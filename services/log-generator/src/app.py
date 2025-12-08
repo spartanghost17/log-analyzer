@@ -15,30 +15,15 @@ from typing import Optional
 
 from confluent_kafka import Producer, KafkaException
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 from prometheus_client import Counter, Gauge, generate_latest
+from settings import setup_development_logging
 import structlog
 
-# Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer()
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    cache_logger_on_first_use=True,
-)
-
+setup_development_logging()
 logger = structlog.get_logger()
 
 # Prometheus metrics
@@ -51,6 +36,7 @@ ERROR_RATE = Gauge('error_log_rate_percentage', 'Current error rate percentage')
 
 class LogLevel(str, Enum):
     """Log severity levels"""
+    TRACE = "TRACE"
     DEBUG = "DEBUG"
     INFO = "INFO"
     WARN = "WARN"
@@ -61,21 +47,21 @@ class LogLevel(str, Enum):
 class Settings(BaseSettings):
     """Service configuration"""
     # Kafka settings
-    kafka_bootstrap_servers: str = Field(default="localhost:9092")
-    kafka_topic: str = Field(default="raw-logs")
+    kafka_bootstrap_servers: str = Field(default="localhost:9092", validation_alias="KAFKA_BOOTSTRAP_SERVERS")
+    kafka_topic: str = Field(default="raw-logs", validation_alias="KAFKA_TOPIC")
 
     # Generation settings
-    log_rate_per_second: int = Field(default=50, ge=1, le=10000)
-    error_rate_percentage: int = Field(default=5, ge=0, le=100)
-    services: str = Field(default="api-gateway,user-service,payment-service,notification-service,auth-service")
+    log_rate_per_second: int = Field(default=50, ge=1, le=10000, validation_alias="LOG_RATE_PER_SECOND")
+    error_rate_percentage: int = Field(default=5, ge=0, le=100, validation_alias="ERROR_RATE_PERCENTAGE")
+    services: str = Field(default="api-gateway,user-service,payment-service,notification-service,auth-service", validation_alias="SERVICES")
 
     # API settings
-    api_host: str = Field(default="0.0.0.0")
-    api_port: int = Field(default=8000)
+    api_host: str = Field(default="0.0.0.0", validation_alias="API_HOST")
+    api_port: int = Field(default=8000, validation_alias="API_PORT")
 
-    class Config:
-        env_prefix = ""
-        case_sensitive = False
+    # class Config:
+    #     env_prefix = ""
+    #     case_sensitive = False
 
 
 class LogEntry(BaseModel):
@@ -426,6 +412,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -524,10 +517,10 @@ async def update_control(control: GeneratorControl):
     }
 
 
-@app.get("/metrics")
+@app.get("/metrics", response_class=PlainTextResponse)
 async def get_metrics():
     """Prometheus metrics endpoint"""
-    return generate_latest()
+    return generate_latest().decode('utf-8')
 
 
 if __name__ == "__main__":
@@ -537,5 +530,6 @@ if __name__ == "__main__":
         app,
         host=settings.api_host,
         port=settings.api_port,
-        log_config=None
+        reload=True,
+        log_config="debug"#None
     )

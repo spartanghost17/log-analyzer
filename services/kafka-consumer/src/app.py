@@ -1,7 +1,7 @@
 """
 ClickHouse Consumer Service
 Consumes logs from Kafka and writes to ClickHouse
-Features: Dead Letter Queue, Batching, SQLAlchemy ORM
+Features: Dead Letter Queue, Batching, clickhouse-connect client
 """
 
 import asyncio
@@ -9,41 +9,39 @@ import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
-from clickhouse_sqlalchemy import (
-    make_session,
-    get_declarative_base,
-    types,
-    engines
-)
+import clickhouse_connect
+from clickhouse_connect.driver.client import Client as ClickHouseClient
 from confluent_kafka import Consumer, Producer, KafkaError
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
-from sqlalchemy import Column, create_engine
+from settings import setup_logging
 import structlog
 
-# Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer()
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    cache_logger_on_first_use=True,
-)
-
+# # Configure structured logging
+# structlog.configure(
+#     processors=[
+#         structlog.stdlib.filter_by_level,
+#         structlog.stdlib.add_logger_name,
+#         structlog.stdlib.add_log_level,
+#         structlog.stdlib.PositionalArgumentsFormatter(),
+#         structlog.processors.TimeStamper(fmt="iso"),
+#         structlog.processors.StackInfoRenderer(),
+#         structlog.processors.format_exc_info,
+#         structlog.processors.UnicodeDecoder(),
+#         structlog.processors.JSONRenderer()
+#     ],
+#     wrapper_class=structlog.stdlib.BoundLogger,
+#     context_class=dict,
+#     logger_factory=structlog.stdlib.LoggerFactory(),
+#     cache_logger_on_first_use=True,
+# )
+setup_logging("DEBUG")
 logger = structlog.get_logger()
 
 # Prometheus metrics
@@ -68,61 +66,40 @@ class LogLevel(str, Enum):
 class Settings(BaseSettings):
     """Service configuration"""
     # Kafka settings
-    kafka_bootstrap_servers: str = Field(default="localhost:9092")
-    kafka_topic: str = Field(default="raw-logs")
-    kafka_dlq_topic: str = Field(default="raw-logs-dlq")
-    kafka_vectorization_topic: str = Field(default="vectorization-queue")
-    kafka_group_id: str = Field(default="clickhouse-consumer-group")
+    kafka_bootstrap_servers: str = Field(default="localhost:9092", validation_alias="KAFKA_BOOTSTRAP_SERVERS")
+    kafka_topic: str = Field(default="raw-logs", validation_alias="KAFKA_TOPIC")
+    kafka_dlq_topic: str = Field(default="raw-logs-dlq", validation_alias="KAFKA_DLQ_TOPIC")
+    kafka_vectorization_topic: str = Field(default="vectorization-queue", validation_alias="KAFKA_VECTORIZATION_TOPIC")
+    kafka_group_id: str = Field(default="clickhouse-consumer-group", validation_alias="KAFKA_GROUP_ID")
 
-    # ClickHouse settings (port 9000 is native protocol)
-    clickhouse_host: str = Field(default="localhost")
-    clickhouse_port: int = Field(default=9000)
-    clickhouse_user: str = Field(default="admin")
-    clickhouse_password: str = Field(default="clickhouse_password")
-    clickhouse_database: str = Field(default="logs_db")
+    # ClickHouse settings - HTTP interface (port 8123)
+    clickhouse_host: str = Field(default="localhost", validation_alias="CLICKHOUSE_HOST")
+    clickhouse_port: int = Field(default=8123, validation_alias="CLICKHOUSE_PORT")  # HTTP port, not 9000
+    clickhouse_user: str = Field(default="admin", validation_alias="CLICKHOUSE_USER")
+    clickhouse_password: str = Field(default="clickhouse_password", validation_alias="CLICKHOUSE_PASSWORD")
+    clickhouse_database: str = Field(default="logs_db", validation_alias="CLICKHOUSE_DATABASE")
 
     # Processing settings
-    batch_size: int = Field(default=1000, ge=1, le=10000)
-    flush_interval_seconds: int = Field(default=5, ge=1, le=60)
+    batch_size: int = Field(default=1000, ge=1, le=10000, validation_alias="BATCH_SIZE")
+    flush_interval_seconds: int = Field(default=5, ge=1, le=60, validation_alias="FLUSH_INTERVAL_SECONDS")
 
     # Vectorization settings
-    enable_vectorization: bool = Field(default=True)
-    vectorize_levels: str = Field(default="ERROR,WARN,FATAL")
+    enable_vectorization: bool = Field(default=True, validation_alias="ENABLE_VECTORIZATION")
+    vectorize_levels: str = Field(default="ERROR,WARN,FATAL", validation_alias="VECTORIZE_LEVELS")
 
     # API settings
-    api_host: str = Field(default="0.0.0.0")
-    api_port: int = Field(default=8001)
+    api_host: str = Field(default="0.0.0.0", validation_alias="API_HOST")
+    api_port: int = Field(default=8001, validation_alias="API_PORT")
 
-    class Config:
-        env_prefix = ""
-        case_sensitive = False
+    # model_config = SettingsConfigDict(
+    #     extra="ignore",
+    #     case_sensitive=False,
+    #     populate_by_name=True,
+    # )
 
-
-# ClickHouse ORM
-Base = get_declarative_base()
-
-
-class LogRecord(Base):
-    """ClickHouse log record model"""
-    __tablename__ = 'logs'
-
-    log_id = Column(types.String, primary_key=True)
-    timestamp = Column(types.DateTime)
-    service = Column(types.String)
-    environment = Column(types.String)
-    level = Column(types.String)
-    message = Column(types.String)
-    trace_id = Column(types.String)
-    user_id = Column(types.String)
-    request_id = Column(types.String)
-    stack_trace = Column(types.String)
-
-    __table_args__ = (
-        engines.MergeTree(
-            partition_by='toYYYYMM(timestamp)',
-            order_by=('timestamp', 'service', 'level'),
-        ),
-    )
+    # class Config:
+    #     env_prefix = ""
+    #     case_sensitive = False
 
 
 # Pydantic Models
@@ -142,7 +119,7 @@ class LogEntry(BaseModel):
     @field_validator('level')
     @classmethod
     def validate_level(cls, v: str) -> str:
-        valid_levels = ["DEBUG", "INFO", "WARN", "ERROR", "FATAL"]
+        valid_levels = ["DEBUG", "INFO", "WARN", "ERROR", "FATAL", "TRACE"]
         if v not in valid_levels:
             raise ValueError(f"Level must be one of {valid_levels}")
         return v
@@ -172,6 +149,12 @@ class ConsumerStats(BaseModel):
 class ClickHouseConsumerService:
     """Kafka consumer that writes to ClickHouse"""
 
+    # Column names for batch insert (must match table schema)
+    COLUMN_NAMES = [
+        'log_id', 'timestamp', 'service', 'environment', 'level',
+        'message', 'trace_id', 'user_id', 'request_id', 'stack_trace'
+    ]
+
     def __init__(self, settings: Settings):
         self.settings = settings
         self.logger = logger.bind(component="clickhouse-consumer")
@@ -181,13 +164,12 @@ class ClickHouseConsumerService:
         self.dlq_producer: Optional[Producer] = None
         self.vectorization_producer: Optional[Producer] = None
 
-        # Database
-        self.engine = None
-        self.SessionLocal = None
+        # ClickHouse client
+        self.ch_client: Optional[ClickHouseClient] = None
 
         # State
         self.running = False
-        self.batch: List[LogRecord] = []
+        self.batch: List[tuple] = []  # List of tuples for batch insert
         self.last_flush_time = datetime.now()
 
         # Statistics
@@ -204,22 +186,18 @@ class ClickHouseConsumerService:
         )
 
     def setup_clickhouse(self):
-        """Setup ClickHouse connection"""
+        """Setup ClickHouse connection using clickhouse-connect"""
         try:
-            # Build connection URL - uses port 9000 (native protocol)
-            url = (
-                f"clickhouse://{self.settings.clickhouse_user}:"
-                f"{self.settings.clickhouse_password}@"
-                f"{self.settings.clickhouse_host}:{self.settings.clickhouse_port}/"
-                f"{self.settings.clickhouse_database}"
+            self.ch_client = clickhouse_connect.get_client(
+                host=self.settings.clickhouse_host,
+                port=self.settings.clickhouse_port,  # HTTP port 8123
+                username=self.settings.clickhouse_user,
+                password=self.settings.clickhouse_password,
+                database=self.settings.clickhouse_database
             )
 
-            self.engine = create_engine(url)
-            self.SessionLocal = make_session(self.engine)
-
             # Test connection
-            with self.SessionLocal() as session:
-                session.execute("SELECT 1")
+            result = self.ch_client.query("SELECT 1")
 
             self.logger.info(
                 "clickhouse_connected",
@@ -351,19 +329,22 @@ class ClickHouseConsumerService:
             self.logger.error("validation_failed", error=str(e))
             return None
 
-    def transform_to_db_model(self, log_entry: LogEntry) -> LogRecord:
-        """Transform Pydantic model to SQLAlchemy model"""
-        return LogRecord(
-            log_id=log_entry.log_id,
-            timestamp=datetime.fromisoformat(log_entry.timestamp.replace('Z', '+00:00')),
-            service=log_entry.service,
-            environment=log_entry.environment,
-            level=log_entry.level,
-            message=log_entry.message,
-            trace_id=log_entry.trace_id or "",
-            user_id=log_entry.user_id or "",
-            request_id=log_entry.request_id or "",
-            stack_trace=log_entry.stack_trace or ""
+    def transform_to_row(self, log_entry: LogEntry) -> tuple:
+        """Transform Pydantic model to tuple for batch insert"""
+        # Parse timestamp
+        ts = datetime.fromisoformat(log_entry.timestamp.replace('Z', '+00:00'))
+
+        return (
+            log_entry.log_id,
+            ts,
+            log_entry.service,
+            log_entry.environment,
+            log_entry.level,
+            log_entry.message,
+            log_entry.trace_id or "",
+            log_entry.user_id or "",
+            log_entry.request_id or "",
+            log_entry.stack_trace or ""
         )
 
     def flush_batch(self):
@@ -375,9 +356,12 @@ class ClickHouseConsumerService:
 
         try:
             with PROCESSING_TIME.time():
-                with self.SessionLocal() as session:
-                    session.add_all(self.batch)
-                    session.commit()
+                # Use clickhouse-connect's batch insert
+                self.ch_client.insert(
+                    table='logs',
+                    data=self.batch,
+                    column_names=self.COLUMN_NAMES
+                )
 
             self.total_written += batch_size
             MESSAGES_WRITTEN.inc(batch_size)
@@ -443,10 +427,10 @@ class ClickHouseConsumerService:
                 # Send to vectorization queue if applicable
                 self.send_to_vectorization_queue(log_entry)
 
-                # Transform to database model
+                # Transform to row tuple
                 try:
-                    db_row = self.transform_to_db_model(log_entry)
-                    self.batch.append(db_row)
+                    row = self.transform_to_row(log_entry)
+                    self.batch.append(row)
                     BATCH_SIZE_METRIC.set(len(self.batch))
 
                 except Exception as e:
@@ -530,6 +514,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -547,7 +538,7 @@ async def health_check():
         service="clickhouse-consumer",
         version="1.0.0",
         kafka_connected=consumer_service.consumer is not None,
-        clickhouse_connected=consumer_service.engine is not None,
+        clickhouse_connected=consumer_service.ch_client is not None,
         messages_processed=consumer_service.total_written,
         uptime_seconds=uptime
     )
@@ -578,10 +569,10 @@ async def force_flush():
     return {"status": "flushed", "batch_size": 0}
 
 
-@app.get("/metrics")
+@app.get("/metrics", response_class=PlainTextResponse)
 async def get_metrics():
     """Prometheus metrics endpoint"""
-    return generate_latest()
+    return generate_latest().decode('utf-8')
 
 
 if __name__ == "__main__":
@@ -591,5 +582,5 @@ if __name__ == "__main__":
         app,
         host=settings.api_host,
         port=settings.api_port,
-        log_config=None
+        log_config="debug" #None
     )

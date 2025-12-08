@@ -4,16 +4,19 @@ Analyzes log patterns using local LLM (Ollama)
 Queries ClickHouse, generates insights, stores reports in PostgreSQL
 """
 
-import asyncio
 import hashlib
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
+import clickhouse_connect
+from clickhouse_connect.driver.client import Client as ClickHouseClient
 import httpx
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
@@ -27,29 +30,29 @@ from sqlalchemy import (
     Float,
     JSON
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import declarative_base, sessionmaker
+from settings import setup_logging
 import structlog
 
-# Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer()
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    cache_logger_on_first_use=True,
-)
-
+# # Configure structured logging
+# structlog.configure(
+#     processors=[
+#         structlog.stdlib.filter_by_level,
+#         structlog.stdlib.add_logger_name,
+#         structlog.stdlib.add_log_level,
+#         structlog.stdlib.PositionalArgumentsFormatter(),
+#         structlog.processors.TimeStamper(fmt="iso"),
+#         structlog.processors.StackInfoRenderer(),
+#         structlog.processors.format_exc_info,
+#         structlog.processors.UnicodeDecoder(),
+#         structlog.processors.JSONRenderer()
+#     ],
+#     wrapper_class=structlog.stdlib.BoundLogger,
+#     context_class=dict,
+#     logger_factory=structlog.stdlib.LoggerFactory(),
+#     cache_logger_on_first_use=True,
+# )
+setup_logging("DEBUG")
 logger = structlog.get_logger()
 
 # Prometheus metrics
@@ -62,35 +65,35 @@ ANOMALIES_DETECTED = Gauge('anomalies_detected', 'Number of anomalies detected')
 
 class Settings(BaseSettings):
     """Service configuration"""
-    # ClickHouse settings (port 9000 is native protocol)
-    clickhouse_host: str = Field(default="localhost")
-    clickhouse_port: int = Field(default=9000)
-    clickhouse_user: str = Field(default="admin")
-    clickhouse_password: str = Field(default="clickhouse_password")
-    clickhouse_database: str = Field(default="logs_db")
+    # ClickHouse settings - HTTP interface (port 8123)
+    clickhouse_host: str = Field(default="localhost", validation_alias="CLICKHOUSE_HOST")
+    clickhouse_port: int = Field(default=8123, validation_alias="CLICKHOUSE_PORT")  # HTTP port, not 9000
+    clickhouse_user: str = Field(default="admin", validation_alias="CLICKHOUSE_USER")
+    clickhouse_password: str = Field(default="clickhouse_password", validation_alias="CLICKHOUSE_PASSWORD")
+    clickhouse_database: str = Field(default="logs_db", validation_alias="CLICKHOUSE_DATABASE")
 
     # PostgreSQL settings
-    postgres_host: str = Field(default="localhost")
-    postgres_port: int = Field(default=5432)
-    postgres_user: str = Field(default="admin")
-    postgres_password: str = Field(default="postgres_password")
-    postgres_db: str = Field(default="log_analysis")
+    postgres_host: str = Field(default="localhost", validation_alias="POSTGRES_HOST")
+    postgres_port: int = Field(default=5432, validation_alias="POSTGRES_PORT")
+    postgres_user: str = Field(default="admin", validation_alias="POSTGRES_USER")
+    postgres_password: str = Field(default="postgres_password", validation_alias="POSTGRES_PASSWORD")
+    postgres_db: str = Field(default="log_analysis", validation_alias="POSTGRES_DB")
 
     # Ollama settings
-    ollama_host: str = Field(default="http://localhost:11434")
-    ollama_model: str = Field(default="deepseek-coder:6.7b")
-    ollama_timeout: int = Field(default=300)
+    ollama_host: str = Field(default="http://localhost:11434", validation_alias="OLLAMA_HOST")
+    ollama_model: str = Field(default="deepseek-coder:6.7b", validation_alias="OLLAMA_MODEL")
+    ollama_timeout: int = Field(default=300, validation_alias="OLLAMA_TIMEOUT")
 
     # Analysis settings
-    analysis_window_hours: int = Field(default=24, ge=1, le=168)
+    analysis_window_hours: int = Field(default=24, ge=1, le=168, validation_alias="ANALYSIS_WINDOW_HOURS")
 
     # API settings
-    api_host: str = Field(default="0.0.0.0")
-    api_port: int = Field(default=8002)
+    api_host: str = Field(default="0.0.0.0", validation_alias="API_HOST")
+    api_port: int = Field(default=8002, validation_alias="API_PORT")
 
-    class Config:
-        env_prefix = ""
-        case_sensitive = False
+    # class Config:
+    #     env_prefix = ""
+    #     case_sensitive = False
 
 
 # PostgreSQL ORM
@@ -180,7 +183,7 @@ class LLMAnalyzerService:
         self.logger = logger.bind(component="llm-analyzer")
 
         # Database connections
-        self.clickhouse_engine = None
+        self.ch_client: Optional[ClickHouseClient] = None
         self.postgres_engine = None
         self.SessionLocal = None
 
@@ -191,22 +194,18 @@ class LLMAnalyzerService:
         self.last_analysis_time: Optional[datetime] = None
 
     def setup_clickhouse(self):
-        """Setup ClickHouse connection"""
+        """Setup ClickHouse connection using clickhouse-connect"""
         try:
-            from clickhouse_sqlalchemy import make_session
-
-            url = (
-                f"clickhouse://{self.settings.clickhouse_user}:"
-                f"{self.settings.clickhouse_password}@"
-                f"{self.settings.clickhouse_host}:{self.settings.clickhouse_port}/"
-                f"{self.settings.clickhouse_database}"
+            self.ch_client = clickhouse_connect.get_client(
+                host=self.settings.clickhouse_host,
+                port=self.settings.clickhouse_port,  # HTTP port 8123
+                username=self.settings.clickhouse_user,
+                password=self.settings.clickhouse_password,
+                database=self.settings.clickhouse_database
             )
 
-            self.clickhouse_engine = create_engine(url)
-
             # Test connection
-            with make_session(self.clickhouse_engine)() as session:
-                session.execute("SELECT 1")
+            result = self.ch_client.query("SELECT 1")
 
             self.logger.info("clickhouse_connected")
 
@@ -287,8 +286,6 @@ class LLMAnalyzerService:
         services: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """Query error logs from ClickHouse"""
-        from clickhouse_sqlalchemy import make_session
-
         query = f"""
         SELECT 
             log_id,
@@ -298,8 +295,8 @@ class LLMAnalyzerService:
             message,
             stack_trace
         FROM logs
-        WHERE timestamp >= '{start_time.isoformat()}'
-          AND timestamp < '{end_time.isoformat()}'
+        WHERE timestamp >= '{start_time.strftime('%Y-%m-%d %H:%M:%S')}'
+          AND timestamp < '{end_time.strftime('%Y-%m-%d %H:%M:%S')}'
           AND level IN ('ERROR', 'WARN', 'FATAL')
         """
 
@@ -310,21 +307,20 @@ class LLMAnalyzerService:
         query += " ORDER BY timestamp DESC LIMIT 10000"
 
         try:
-            with make_session(self.clickhouse_engine)() as session:
-                result = session.execute(query)
+            result = self.ch_client.query(query)
 
-                logs = []
-                for row in result:
-                    logs.append({
-                        'log_id': row[0],
-                        'timestamp': row[1],
-                        'service': row[2],
-                        'level': row[3],
-                        'message': row[4],
-                        'stack_trace': row[5]
-                    })
+            logs = []
+            for row in result.result_rows:
+                logs.append({
+                    'log_id': row[0],
+                    'timestamp': row[1],
+                    'service': row[2],
+                    'level': row[3],
+                    'message': row[4],
+                    'stack_trace': row[5]
+                })
 
-                return logs
+            return logs
 
         except Exception as e:
             self.logger.error("query_failed", error=str(e))
@@ -592,6 +588,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -617,7 +620,7 @@ async def health_check():
         status="healthy",
         service="llm-analyzer",
         version="1.0.0",
-        clickhouse_connected=analyzer_service.clickhouse_engine is not None,
+        clickhouse_connected=analyzer_service.ch_client is not None,
         postgres_connected=analyzer_service.postgres_engine is not None,
         ollama_connected=ollama_connected,
         last_analysis=analyzer_service.last_analysis_time.isoformat() if analyzer_service.last_analysis_time else None
@@ -679,10 +682,10 @@ async def get_latest_report():
     return report
 
 
-@app.get("/metrics")
+@app.get("/metrics", response_class=PlainTextResponse)
 async def get_metrics():
     """Prometheus metrics endpoint"""
-    return generate_latest()
+    return generate_latest().decode('utf-8')
 
 
 if __name__ == "__main__":
@@ -692,5 +695,5 @@ if __name__ == "__main__":
         app,
         host=settings.api_host,
         port=settings.api_port,
-        log_config=None
+        log_config="debug" #None
     )
