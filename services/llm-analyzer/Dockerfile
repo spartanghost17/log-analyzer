@@ -1,3 +1,23 @@
+#FROM python:3.11-slim
+#
+#WORKDIR /app
+#
+## Install curl for health checks
+#RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+#
+## Install Python dependencies
+#COPY requirements.txt .
+#RUN pip install --no-cache-dir -r requirements.txt
+#
+## Copy application
+#COPY src/app.py .
+#
+## Expose API port
+#EXPOSE 8002
+#
+## Run the FastAPI application
+#CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8002"]
+
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -5,15 +25,17 @@ WORKDIR /app
 # Install curl for health checks
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application
-COPY app.py .
+# Copy ALL source code
+# COPY services/llm-analyzer/src ./src
+COPY /src ./src
 
-# Expose API port
+# Tell Python where code lives
+ENV PYTHONPATH=/app/src
+
 EXPOSE 8002
 
-# Run the FastAPI application
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8002"]
