@@ -1,0 +1,33 @@
+[project]
+name = "log-analyzer-workspace"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "clickhouse-connect==0.8.9",
+    "confluent-kafka==2.6.1",
+    "faker==33.1.0",
+    "fastapi==0.115.5",
+    "httpx==0.28.1",
+    "prometheus-client==0.21.0",
+    "psycopg2-binary==2.9.10",
+    "pybreaker==1.4.1",
+    "pydantic==2.10.3",
+    "pydantic-settings==2.6.1",
+    "sqlalchemy==2.0.36",
+    "structlog==24.4.0",
+    "uvicorn[standard]==0.32.1",
+]
+
+#[tool.uv.source] # shared local module that can be imported by workspaces
+#core = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "services/kafka-consumer",
+    "services/llm-analyzer",
+    "services/log-generator",
+    "services/jina-embeddings",
+    "services/vectorization-worker",
+]
