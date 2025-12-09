@@ -41,52 +41,52 @@ help:
 # Start all services using the start script
 start:
 	@echo "🚀 Starting all services..."
-	./start.sh
+	./infrastructure/start.sh
 
 # Deploy using production docker-compose
 deploy:
 	@echo "🚀 Deploying services..."
-	docker compose -f docker-compose.yml --project-directory . up -d
+	docker compose -f infrastructure/docker-compose.yml --project-directory . up -d
 
 # Stop and remove all containers and volumes
 down:
 	@echo "🛑 Stopping and removing all containers and volumes..."
-	docker compose -f docker-compose.yml --project-directory . down --volumes
+	docker compose -f infrastructure/docker-compose.yml --project-directory . down --volumes
 
 # Build all services without cache
 build:
 	@echo "🔨 Building all services (no cache)..."
-	docker compose -f docker-compose.yml --project-directory . build --no-cache
+	docker compose -f infrastructure/docker-compose.yml --project-directory . build --no-cache
 
 # Stop all services
 stop:
 	@echo "🛑 Stopping all services..."
-	docker compose -f docker-compose.yml --project-directory . stop
+	docker compose -f infrastructure/docker-compose.yml --project-directory . stop
 
 # Show all logs (follow mode)
 logs:
 	@echo "📋 Following all logs (Ctrl+C to exit)..."
-	docker compose -f docker-compose.yml --project-directory . logs -f
+	docker compose -f dinfrastructure/docker-compose.yml --project-directory . logs -f
 
 # Show Phase 1 service logs only
 logs-phase1:
 	@echo "📋 Following Phase 1 logs (Ctrl+C to exit)..."
-	docker compose -f docker-compose.yml --project-directory . logs -f log-generator kafka-consumer llm-analyzer
+	docker compose -f infrastructure/docker-compose.yml --project-directory . logs -f log-generator clickhouse-consumer llm-analyzer
 
 # Show Phase 2 service logs only
 logs-phase2:
 	@echo "📋 Following Phase 2 logs (Ctrl+C to exit)..."
-	docker compose -f docker-compose.yml --project-directory . logs -f jina-embeddings vectorization-worker
+	docker compose -f infrastructure/docker-compose.yml --project-directory . logs -f jina-embeddings vectorization-worker
 
 # Show Phase 3 service logs only
 logs-phase3:
 	@echo "📋 Following Phase 3 logs (Ctrl+C to exit)..."
-	docker compose -f docker-compose.yml --project-directory . logs -f api frontend
+	docker compose -f infrastructure/docker-compose.yml --project-directory . logs -f api frontend
 
 # Show container status
 status:
 	@echo "📊 Container Status:"
-	@docker compose -f docker-compose.yml --project-directory . ps
+	@docker compose -f infrastructure/docker-compose.yml --project-directory . ps
 
 # Check health of all services
 health:
@@ -124,27 +124,27 @@ health-phase3:
 	@curl -s http://localhost:3000 > /dev/null 2>&1 && echo "  ✅ Responding" || echo "  ❌ Not responding"
 	@echo ""
 
-# Rebuild Phase 1 services (log-generator, kafka-consumer, llm-analyzer)
+# Rebuild Phase 1 services (log-generator, clickhouse-consumer, llm-analyzer)
 rebuild-phase1:
 	@echo "🔧 Rebuilding Phase 1 Services..."
 	@echo ""
 	@echo "1️⃣  Stopping services..."
-	docker compose -f docker-compose.yml --project-directory . stop log-generator kafka-consumer llm-analyzer
+	docker compose -f infrastructure/docker-compose.yml --project-directory . stop log-generator clickhouse-consumer llm-analyzer
 	@echo ""
 	@echo "2️⃣  Removing old containers..."
-	docker compose -f docker-compose.yml --project-directory . rm -f log-generator kafka-consumer llm-analyzer
+	docker compose -f infrastructure/docker-compose.yml --project-directory . rm -f log-generator clickhouse-consumer llm-analyzer
 	@echo ""
 	@echo "3️⃣  Rebuilding services (no cache)..."
-	docker compose -f docker-compose.yml --project-directory . build --no-cache log-generator kafka-consumer llm-analyzer
+	docker compose -f infrastructure/docker-compose.yml --project-directory . build --no-cache log-generator clickhouse-consumer llm-analyzer
 	@echo ""
 	@echo "4️⃣  Starting services..."
-	docker compose -f docker-compose.yml --project-directory . up -d log-generator kafka-consumer llm-analyzer
+	docker compose -f infrastructure/docker-compose.yml --project-directory . up -d log-generator clickhouse-consumer llm-analyzer
 	@echo ""
 	@echo "5️⃣  Waiting for services to start..."
 	@sleep 10
 	@echo ""
 	@echo "6️⃣  Checking status..."
-	@docker compose -f docker-compose.yml --project-directory . ps log-generator kafka-consumer llm-analyzer
+	@docker compose -f infrastructure/docker-compose.yml --project-directory . ps log-generator clickhouse-consumer llm-analyzer
 	@echo ""
 	@echo "✅ Rebuild complete!"
 	@echo ""
@@ -156,26 +156,26 @@ rebuild-phase2:
 	@echo "🔧 Rebuilding Phase 2 Services..."
 	@echo ""
 	@echo "1️⃣  Stopping services..."
-	docker compose -f docker-compose.yml --project-directory . stop jina-embeddings vectorization-worker
+	docker compose -f infrastructure/docker-compose.yml --project-directory . stop jina-embeddings vectorization-worker
 	@echo ""
 	@echo "2️⃣  Removing old containers..."
-	docker compose -f docker-compose.yml --project-directory . rm -f jina-embeddings vectorization-worker qdrant-init
+	docker compose -f infrastructure/docker-compose.yml --project-directory . rm -f jina-embeddings vectorization-worker qdrant-init
 	@echo ""
 	@echo "3️⃣  Rebuilding services (no cache)..."
-	docker compose -f docker-compose.yml --project-directory . build --no-cache jina-embeddings vectorization-worker
+	docker compose -f infrastructure/docker-compose.yml --project-directory . build --no-cache jina-embeddings vectorization-worker
 	@echo ""
 	@echo "4️⃣  Reinitializing Qdrant..."
-	docker compose -f docker-compose.yml --project-directory . up -d qdrant-init
+	docker compose -f infrastructure/docker-compose.yml --project-directory . up -d qdrant-init
 	@sleep 5
 	@echo ""
 	@echo "5️⃣  Starting services..."
-	docker compose -f docker-compose.yml --project-directory . up -d jina-embeddings vectorization-worker
+	docker compose -f infrastructure/docker-compose.yml --project-directory . up -d jina-embeddings vectorization-worker
 	@echo ""
 	@echo "6️⃣  Waiting for services to start..."
 	@sleep 10
 	@echo ""
 	@echo "7️⃣  Checking status..."
-	@docker compose -f docker-compose.yml --project-directory . ps jina-embeddings vectorization-worker
+	@docker compose -f infrastructure/docker-compose.yml --project-directory . ps jina-embeddings vectorization-worker
 	@echo ""
 	@echo "✅ Rebuild complete!"
 	@echo ""
@@ -187,22 +187,22 @@ rebuild-phase3:
 	@echo "🔧 Rebuilding Phase 3 Services..."
 	@echo ""
 	@echo "1️⃣  Stopping services..."
-	docker compose -f docker-compose.yml --project-directory . stop api frontend
+	docker compose -f infrastructure/docker-compose.yml --project-directory . stop api frontend
 	@echo ""
 	@echo "2️⃣  Removing old containers..."
-	docker compose -f docker-compose.yml --project-directory . rm -f api frontend
+	docker compose -f infrastructure/docker-compose.yml --project-directory . rm -f api frontend
 	@echo ""
 	@echo "3️⃣  Rebuilding services (no cache)..."
-	docker compose -f docker-compose.yml --project-directory . build --no-cache api frontend
+	docker compose -f infrastructure/docker-compose.yml --project-directory . build --no-cache api frontend
 	@echo ""
 	@echo "4️⃣  Starting services..."
-	docker compose -f docker-compose.yml --project-directory . up -d api frontend
+	docker compose -f infrastructure/docker-compose.yml --project-directory . up -d api frontend
 	@echo ""
 	@echo "5️⃣  Waiting for services to start..."
 	@sleep 10
 	@echo ""
 	@echo "6️⃣  Checking status..."
-	@docker compose -f docker-compose.yml --project-directory . ps api frontend
+	@docker compose -f infrastructure/docker-compose.yml --project-directory . ps api frontend
 	@echo ""
 	@echo "✅ Rebuild complete!"
 	@echo ""
@@ -215,19 +215,19 @@ rebuild-all:
 	@echo "🔨 Complete rebuild (down, build, up)..."
 	@echo ""
 	@echo "1️⃣  Stopping and removing everything..."
-	docker compose -f docker-compose.yml --project-directory . down --volumes
+	docker compose -f infrastructure/docker-compose.yml --project-directory . down --volumes
 	@echo ""
 	@echo "2️⃣  Building all services (no cache)..."
-	docker compose -f docker-compose.yml --project-directory . build --no-cache
+	docker compose -f infrastructure/docker-compose.yml --project-directory . build --no-cache
 	@echo ""
 	@echo "3️⃣  Starting all services..."
-	docker compose -f docker-compose.yml --project-directory . up -d
+	docker compose -f infrastructure/docker-compose.yml --project-directory . up -d
 	@echo ""
 	@echo "4️⃣  Waiting for services to start..."
 	@sleep 15
 	@echo ""
 	@echo "5️⃣  Checking status..."
-	@docker compose -f docker-compose.yml --project-directory . ps
+	@docker compose -f infrastructure/docker-compose.yml --project-directory . ps
 	@echo ""
 	@echo "✅ Complete rebuild done!"
 	@echo ""
