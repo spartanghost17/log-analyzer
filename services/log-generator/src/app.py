@@ -2,16 +2,18 @@
 Log Generator Service
 Generates realistic application logs and produces them to Kafka
 Uses FastAPI for control API and Confluent Kafka for production
+Enhanced with Faker for realistic data generation
 """
 
 import asyncio
+import json
 import random
 import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from confluent_kafka import Producer, KafkaException
 from fastapi import FastAPI, HTTPException, status
@@ -20,11 +22,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 from prometheus_client import Counter, Gauge, generate_latest
+from faker import Faker
 from settings import setup_development_logging
 import structlog
 
 setup_development_logging()
 logger = structlog.get_logger()
+
+# Initialize Faker
+fake = Faker()
 
 # Prometheus metrics
 LOGS_GENERATED = Counter('logs_generated_total', 'Total logs generated')
@@ -65,17 +71,43 @@ class Settings(BaseSettings):
 
 
 class LogEntry(BaseModel):
-    """Log entry model"""
+    """Enhanced log entry model matching ClickHouse schema"""
+    # Core fields
     log_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    # Service identification
     service: str
     environment: str = "production"
+    host: Optional[str] = None
+    pod_name: Optional[str] = None
+    container_id: Optional[str] = None
+
+    # Log metadata
     level: LogLevel
+    logger_name: Optional[str] = None
     message: str
+    stack_trace: Optional[str] = None
+
+    # Distributed tracing
     trace_id: Optional[str] = None
+    span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
+
+    # Additional context
+    thread_name: Optional[str] = None
     user_id: Optional[str] = None
     request_id: Optional[str] = None
-    stack_trace: Optional[str] = None
+    correlation_id: Optional[str] = None
+
+    # Structured metadata
+    labels: Optional[Dict[str, str]] = None
+    metadata: Optional[str] = None  # JSON string
+
+    # Source information
+    source_type: Optional[str] = None
+    source_file: Optional[str] = None
+    source_line: Optional[int] = None
 
     class Config:
         use_enum_values = True
@@ -234,7 +266,7 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
             LOGS_SENT.inc()
 
     def generate_log(self) -> LogEntry:
-        """Generate a single log entry"""
+        """Generate a single enhanced log entry with realistic data"""
         # Determine log level based on error rate
         is_error = random.random() * 100 < self.current_error_rate
 
@@ -245,6 +277,9 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
             level = random.choice([LogLevel.INFO, LogLevel.DEBUG])
             message_template = random.choice(self.INFO_MESSAGES)
 
+        # Select service
+        service = random.choice(self.services)
+
         # Format message with random values
         message = message_template.format(
             time=random.randint(10, 5000),
@@ -252,14 +287,91 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
             user=f"user_{random.randint(1, 1000)}"
         )
 
-        # Create log entry
+        # Generate infrastructure details
+        host = fake.hostname()
+        pod_name = f"{service}-{fake.slug()}-{random.randint(1, 5)}"
+        container_id = fake.sha256()[:12]
+
+        # Generate tracing IDs (70% of requests have traces)
+        has_trace = random.random() > 0.3
+        trace_id = str(uuid.uuid4()) if has_trace else None
+        span_id = fake.sha256()[:16] if has_trace else None
+        parent_span_id = fake.sha256()[:16] if has_trace and random.random() > 0.4 else None
+
+        # Generate correlation ID for related requests
+        correlation_id = str(uuid.uuid4()) if random.random() > 0.5 else None
+
+        # Generate user context
+        user_id = f"user_{random.randint(1, 1000)}" if random.random() > 0.2 else None
+
+        # Generate thread information
+        thread_names = ["http-nio-8080-exec-", "async-task-", "kafka-consumer-", "scheduled-"]
+        thread_name = f"{random.choice(thread_names)}{random.randint(1, 20)}"
+
+        # Generate logger name based on service
+        logger_components = [
+            f"com.example.{service.replace('-', '.')}.controller",
+            f"com.example.{service.replace('-', '.')}.service",
+            f"com.example.{service.replace('-', '.')}.repository",
+            f"com.example.{service.replace('-', '.')}.config",
+            f"org.springframework.web",
+            f"org.hibernate.SQL",
+        ]
+        logger_name = random.choice(logger_components)
+
+        # Generate source code information
+        source_files = [
+            f"src/main/java/com/example/{service.replace('-', '/')}/controller/ApiController.java",
+            f"src/main/java/com/example/{service.replace('-', '/')}/service/BusinessService.java",
+            f"src/main/java/com/example/{service.replace('-', '/')}/repository/DataRepository.java",
+            f"app/services/{service.replace('-', '_')}/main.py",
+            f"app/api/{service.replace('-', '_')}/routes.py",
+        ]
+        source_file = random.choice(source_files)
+        source_line = random.randint(10, 500)
+        source_type = "application"
+
+        # Generate labels (key-value pairs)
+        labels = {
+            "region": random.choice(["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"]),
+            "cluster": random.choice(["prod-cluster-1", "prod-cluster-2", "prod-cluster-3"]),
+            "version": f"v{random.randint(1, 3)}.{random.randint(0, 20)}.{random.randint(0, 10)}",
+            "deployment": random.choice(["blue", "green"]),
+        }
+
+        # Generate metadata (contextual information)
+        metadata_dict = {
+            "http_method": random.choice(["GET", "POST", "PUT", "DELETE", "PATCH"]),
+            "endpoint": f"/api/v1/{random.choice(['users', 'orders', 'products', 'payments'])}",
+            "status_code": random.choice([200, 201, 400, 401, 403, 404, 500, 503]),
+            "client_ip": fake.ipv4(),
+            "user_agent": fake.user_agent(),
+            "duration_ms": random.randint(5, 2000),
+        }
+        metadata = json.dumps(metadata_dict)
+
+        # Create enhanced log entry
         log = LogEntry(
-            service=random.choice(self.services),
+            service=service,
+            environment="production",
+            host=host,
+            pod_name=pod_name,
+            container_id=container_id,
             level=level,
+            logger_name=logger_name,
             message=message,
-            trace_id=str(uuid.uuid4()) if random.random() > 0.5 else None,
-            user_id=f"user_{random.randint(1, 1000)}" if random.random() > 0.3 else None,
-            request_id=str(uuid.uuid4())
+            trace_id=trace_id,
+            span_id=span_id,
+            parent_span_id=parent_span_id,
+            thread_name=thread_name,
+            user_id=user_id,
+            request_id=str(uuid.uuid4()),
+            correlation_id=correlation_id,
+            labels=labels,
+            metadata=metadata,
+            source_type=source_type,
+            source_file=source_file,
+            source_line=source_line,
         )
 
         # Add stack trace for ERROR and FATAL
