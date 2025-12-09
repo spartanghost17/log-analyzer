@@ -1,10 +1,23 @@
-confluent-kafka==2.3.0
-clickhouse-connect==0.7.0
-clickhouse-sqlalchemy==0.3.0
-sqlalchemy==2.0.23
-pydantic==2.5.3
-pydantic-settings==2.1.0
-structlog==24.1.0
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-prometheus-client==0.19.0
+# Kafka
+confluent-kafka==2.6.1
+
+# ClickHouse - using clickhouse-connect (official, maintained)
+# Uses HTTP interface (port 8123), NOT native protocol
+clickhouse-connect==0.8.9
+
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# Data validation
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Logging
+structlog==24.4.0
+
+# Metrics
+prometheus-client==0.21.0
+
+# resiliency
+pybreaker==1.4.1
