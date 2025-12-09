@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <logger>
+        <level>information</level>
+        <log>/var/log/clickhouse-server/clickhouse-server.log</log>
+        <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
+        <size>1000M</size>
+        <count>3</count>
+    </logger>
+
+    <!-- Listen on all interfaces -->
+    <listen_host>0.0.0.0</listen_host>
+
+    <!-- Connection limits (these ARE valid at root level) -->
+    <max_concurrent_queries>100</max_concurrent_queries>
+    <max_connections>4096</max_connections>
+
+    <!-- Query settings (these ARE valid at root level) -->
+    <max_query_size>262144</max_query_size>
+    <interactive_delay>100000</interactive_delay>
+
+    <!-- Background operations -->
+    <background_pool_size>16</background_pool_size>
+    <background_schedule_pool_size>16</background_schedule_pool_size>
+
+    <!-- Memory settings MUST be inside profiles -->
+    <profiles>
+        <default>
+            <max_memory_usage>10000000000</max_memory_usage>
+            <max_memory_usage_for_user>10000000000</max_memory_usage_for_user>
+        </default>
+    </profiles>
+
+    <!-- Compression settings need proper structure -->
+    <merge_tree>
+        <min_compress_block_size>65536</min_compress_block_size>
+        <max_compress_block_size>1048576</max_compress_block_size>
+    </merge_tree>
+</clickhouse>

@@ -1,0 +1,366 @@
+-- ============================================
+-- ClickHouse Database Initialization
+-- Log Analysis Platform
+-- ============================================
+
+CREATE DATABASE IF NOT EXISTS logs_db;
+
+USE logs_db;
+
+-- ============================================
+-- 1. MAIN LOGS TABLE (Raw Storage)
+-- ============================================
+CREATE TABLE IF NOT EXISTS logs (
+    -- Core fields
+    log_id UUID DEFAULT generateUUIDv4(),
+    timestamp DateTime64(3, 'UTC'),
+
+    -- Service identification
+    service LowCardinality(String),
+    environment LowCardinality(String) DEFAULT 'production',
+    host LowCardinality(String),
+    pod_name String,
+    container_id String,
+
+    -- Log metadata
+    level Enum8(
+        'TRACE' = 1,
+        'DEBUG' = 2,
+        'INFO' = 3,
+        'WARN' = 4,
+        'ERROR' = 5,
+        'FATAL' = 6
+    ),
+    logger_name LowCardinality(String),
+
+    -- Message content
+    message String,
+    stack_trace String,
+
+    -- Distributed tracing
+    trace_id String,
+    span_id String,
+    parent_span_id String,
+
+    -- Additional context
+    thread_name LowCardinality(String),
+    user_id String,
+    request_id String,
+    correlation_id String,
+
+    -- Structured metadata (JSON)
+    labels Map(String, String),
+    metadata String,
+
+    -- Processing flags
+    is_vectorized UInt8 DEFAULT 0,
+    is_anomaly UInt8 DEFAULT 0,
+    anomaly_score Float32 DEFAULT 0,
+
+    -- Source information
+    source_type LowCardinality(String),
+    source_file String,
+    source_line UInt32,
+
+    -- Ingestion metadata
+    ingested_at DateTime DEFAULT now(),
+    processed_at DateTime DEFAULT now()
+
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(timestamp)
+ORDER BY (service, level, timestamp)
+TTL timestamp + INTERVAL 90 DAY
+SETTINGS index_granularity = 8192;
+
+-- Add indexes for faster queries
+ALTER TABLE logs ADD INDEX IF NOT EXISTS idx_trace_id trace_id TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE logs ADD INDEX IF NOT EXISTS idx_correlation_id correlation_id TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE logs ADD INDEX IF NOT EXISTS idx_message message TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1;
+
+-- ============================================
+-- 2. ERROR PATTERNS TABLE (Aggregated)
+-- ============================================
+CREATE TABLE IF NOT EXISTS error_patterns (
+    pattern_id UUID DEFAULT generateUUIDv4(),
+
+    -- Pattern identification
+    error_hash String,
+    normalized_message String,
+
+    -- Pattern metadata
+    first_seen DateTime64(3, 'UTC'),
+    last_seen DateTime64(3, 'UTC'),
+    occurrence_count UInt64,
+
+    -- Affected services
+    services Array(String),
+    environments Array(String),
+
+    -- Severity tracking
+    max_level Enum8(
+        'TRACE' = 1,
+        'DEBUG' = 2,
+        'INFO' = 3,
+        'WARN' = 4,
+        'ERROR' = 5,
+        'FATAL' = 6
+    ),
+
+    -- Sample logs
+    sample_log_ids Array(UUID),
+    sample_stack_trace String,
+
+    -- Analysis results
+    is_known UInt8 DEFAULT 0,
+    category LowCardinality(String),
+    tags Array(String),
+
+    -- Vector search metadata
+    has_embedding UInt8 DEFAULT 0,
+    qdrant_point_id String,
+
+    -- Statistics
+    avg_occurrences_per_day Float32,
+    trend Enum8('increasing' = 1, 'stable' = 2, 'decreasing' = 3),
+
+    created_at DateTime DEFAULT now(),
+    updated_at DateTime DEFAULT now()
+
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY (error_hash, last_seen)
+TTL last_seen + INTERVAL 180 DAY;
+
+-- ============================================
+-- 3. HOURLY AGGREGATIONS (Materialized View)
+--    Using AggregatingMergeTree for correct
+--    handling of uniq() and complex aggregates
+-- ============================================
+CREATE TABLE IF NOT EXISTS logs_hourly_agg (
+    hour DateTime,
+    service LowCardinality(String),
+    environment LowCardinality(String),
+    level LowCardinality(String),
+
+    -- Simple counts (can be summed directly)
+    log_count SimpleAggregateFunction(sum, UInt64),
+
+    -- Unique counts require AggregateFunction to merge correctly
+    -- These store HyperLogLog sketches, not final values
+    unique_traces AggregateFunction(uniq, String),
+    unique_users AggregateFunction(uniq, String),
+
+    -- For averages, store sum and count separately
+    -- avg = message_length_sum / message_count
+    message_length_sum SimpleAggregateFunction(sum, UInt64),
+    message_count SimpleAggregateFunction(sum, UInt64)
+
+) ENGINE = AggregatingMergeTree()
+PARTITION BY toYYYYMM(hour)
+ORDER BY (service, environment, level, hour);
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS logs_hourly_agg_mv TO logs_hourly_agg
+AS SELECT
+    toStartOfHour(timestamp) as hour,
+    service,
+    environment,
+    toString(level) as level,
+
+    -- Simple count
+    count() as log_count,
+
+    -- State functions store intermediate states for later merging
+    uniqState(trace_id) as unique_traces,
+    uniqState(user_id) as unique_users,
+
+    -- Components for computing average later
+    sum(length(message)) as message_length_sum,
+    count() as message_count
+
+FROM logs
+GROUP BY hour, service, environment, level;
+
+-- ============================================
+-- 4. ANOMALY DETECTION BASELINE
+-- ============================================
+CREATE TABLE IF NOT EXISTS anomaly_baselines (
+    metric_id UUID DEFAULT generateUUIDv4(),
+
+    -- Metric identification
+    service LowCardinality(String),
+    environment LowCardinality(String),
+    level LowCardinality(String),
+    hour_of_day UInt8,
+    day_of_week UInt8,
+
+    -- Statistical measures
+    mean_count Float64,
+    stddev_count Float64,
+    median_count Float64,
+    p95_count Float64,
+    p99_count Float64,
+
+    -- Thresholds
+    lower_threshold Float64,
+    upper_threshold Float64,
+
+    -- Metadata
+    sample_size UInt32,
+    last_updated DateTime DEFAULT now()
+
+) ENGINE = ReplacingMergeTree(last_updated)
+ORDER BY (service, environment, level, hour_of_day, day_of_week);
+
+-- ============================================
+-- 5. HELPER VIEWS FOR ANALYSIS
+-- ============================================
+
+-- View: Recent errors (last 24 hours)
+CREATE VIEW IF NOT EXISTS recent_errors AS
+SELECT
+    log_id,
+    timestamp,
+    service,
+    environment,
+    level,
+    message,
+    stack_trace,
+    trace_id
+FROM logs
+WHERE level IN ('WARN', 'ERROR', 'FATAL')
+    AND timestamp >= now() - INTERVAL 24 HOUR
+ORDER BY timestamp DESC;
+
+-- View: Error rate by service
+CREATE VIEW IF NOT EXISTS error_rate_by_service AS
+SELECT
+    service,
+    environment,
+    toStartOfHour(timestamp) as hour,
+    countIf(level IN ('ERROR', 'FATAL')) as error_count,
+    count() as total_count,
+    (error_count / total_count) * 100 as error_rate_percentage
+FROM logs
+WHERE timestamp >= now() - INTERVAL 7 DAY
+GROUP BY service, environment, hour
+ORDER BY error_rate_percentage DESC;
+
+-- View: Top errors by frequency
+CREATE VIEW IF NOT EXISTS top_errors AS
+SELECT
+    substring(message, 1, 100) as message_preview,
+    service,
+    level,
+    count() as occurrence_count,
+    min(timestamp) as first_seen,
+    max(timestamp) as last_seen,
+    uniq(trace_id) as unique_traces
+FROM logs
+WHERE level IN ('ERROR', 'FATAL')
+    AND timestamp >= now() - INTERVAL 24 HOUR
+GROUP BY message_preview, service, level
+ORDER BY occurrence_count DESC
+LIMIT 50;
+
+-- ============================================
+-- 6. HELPER VIEW FOR QUERYING HOURLY AGGREGATIONS
+--    Use this view to get final computed values
+-- ============================================
+CREATE VIEW IF NOT EXISTS logs_hourly_stats AS
+SELECT
+    hour,
+    service,
+    environment,
+    level,
+    log_count,
+    -- Merge functions finalize the aggregate states
+    uniqMerge(unique_traces) as unique_traces,
+    uniqMerge(unique_users) as unique_users,
+    -- Compute average from sum/count
+    -- if(message_count > 0, message_length_sum / message_count, 0) as avg_message_length
+    -- Calculate average
+    CASE
+        WHEN message_count > 0
+        THEN message_length_sum / message_count
+        ELSE 0
+    END as avg_message_length
+FROM logs_hourly_agg
+GROUP BY hour, service, environment, level, log_count, message_length_sum, message_count;
+
+-- ============================================
+-- 7. USEFUL QUERIES (As Comments)
+-- ============================================
+
+/*
+-- Query: Get hourly stats (use the helper view)
+SELECT * FROM logs_hourly_stats
+WHERE hour >= now() - INTERVAL 24 HOUR
+ORDER BY hour DESC;
+
+-- Query: Get all errors from a specific service in the last hour
+SELECT * FROM logs
+WHERE service = 'api-gateway'
+    AND level IN ('ERROR', 'FATAL')
+    AND timestamp >= now() - INTERVAL 1 HOUR
+ORDER BY timestamp DESC;
+
+-- Query: Calculate error rate spike detection
+WITH hourly_errors AS (
+    SELECT
+        toStartOfHour(timestamp) as hour,
+        count() as error_count
+    FROM logs
+    WHERE level IN ('ERROR', 'FATAL')
+        AND timestamp >= now() - INTERVAL 24 HOUR
+    GROUP BY hour
+),
+stats AS (
+    SELECT
+        avg(error_count) as avg_errors,
+        stddevPop(error_count) as stddev_errors
+    FROM hourly_errors
+)
+SELECT
+    h.hour,
+    h.error_count,
+    s.avg_errors,
+    s.stddev_errors,
+    (h.error_count - s.avg_errors) / s.stddev_errors as z_score
+FROM hourly_errors h
+CROSS JOIN stats s
+WHERE z_score > 2
+ORDER BY z_score DESC;
+
+-- Query: Find logs related to a specific trace
+SELECT * FROM logs
+WHERE trace_id = 'your-trace-id-here'
+ORDER BY timestamp;
+
+-- Query: Get error distribution by service and level
+SELECT
+    service,
+    level,
+    count() as count,
+    count() / sum(count()) OVER () * 100 as percentage
+FROM logs
+WHERE timestamp >= now() - INTERVAL 24 HOUR
+    AND level IN ('WARN', 'ERROR', 'FATAL')
+GROUP BY service, level
+ORDER BY count DESC;
+
+-- Query: Directly query the aggregated table with proper merging
+SELECT
+    hour,
+    service,
+    sum(log_count) as total_logs,
+    uniqMerge(unique_traces) as unique_traces,
+    uniqMerge(unique_users) as unique_users
+FROM logs_hourly_agg
+WHERE hour >= now() - INTERVAL 7 DAY
+GROUP BY hour, service
+ORDER BY hour DESC;
+*/
+
+-- ============================================
+-- INITIALIZATION COMPLETE
+-- ============================================
+SELECT 'ClickHouse initialization completed successfully!' as status;

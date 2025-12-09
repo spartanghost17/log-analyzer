@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <!-- ============================================
+         USER/PROFILE SETTINGS
+         Location: /etc/clickhouse-server/users.d/
+         These control query behavior and resource limits per user
+         ============================================ -->
+
+    <!-- PROFILES define groups of settings that can be assigned to users
+         Think of them like "permission levels" or "resource tiers"
+
+         Example use cases:
+         - "default" profile: normal users
+         - "readonly" profile: dashboard/reporting users
+         - "admin" profile: unlimited resources -->
+    <profiles>
+        <default>
+            <!-- MEMORY LIMITS
+                 Prevents a single query from using all RAM and crashing the server -->
+
+            <!-- Max RAM for a single query (10 GB)
+                 If exceeded, query fails with "Memory limit exceeded"
+                 Set based on: (Total RAM - OS needs) / max_concurrent_queries -->
+            <max_memory_usage>10000000000</max_memory_usage>
+
+            <!-- Max RAM for ALL queries by a single user combined
+                 Useful for multi-tenant systems -->
+            <max_memory_usage_for_user>10000000000</max_memory_usage_for_user>
+
+            <!-- QUERY SIZE LIMITS -->
+
+            <!-- Max size of SQL query text in bytes (256 KB)
+                 Prevents accidentally huge queries (like massive IN lists) -->
+            <max_query_size>262144</max_query_size>
+
+            <!-- INTERACTIVE SETTINGS -->
+
+            <!-- How often (microseconds) to check if query was cancelled
+                 Lower = more responsive cancellation, but tiny overhead
+                 100000 = 100ms = check 10 times per second -->
+            <interactive_delay>100000</interactive_delay>
+        </default>
+
+        <!-- Example: Read-only profile for dashboards -->
+        <!--
+        <readonly>
+            <readonly>1</readonly>
+            <max_memory_usage>5000000000</max_memory_usage>
+        </readonly>
+        -->
+    </profiles>
+
+</clickhouse>
