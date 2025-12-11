@@ -6,23 +6,24 @@ Properly implements all table responsibilities per architecture
 """
 
 import hashlib
-import json
 import re
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from uuid import uuid4
 
 import clickhouse_connect
-from clickhouse_connect.driver.client import Client as ClickHouseClient
 import httpx
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from clickhouse_connect.driver.client import Client as ClickHouseClient
 from fastapi import FastAPI, HTTPException, status, BackgroundTasks
-from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
+from prometheus_client import Counter, Histogram, Gauge, generate_latest
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
-from prometheus_client import Counter, Histogram, Gauge, generate_latest
 from sqlalchemy import (
     create_engine,
     Column,
@@ -38,14 +39,14 @@ from sqlalchemy import (
     ARRAY
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.exc import IntegrityError
-from settings import setup_development_logging
-import structlog
+from sqlalchemy.orm import declarative_base, sessionmaker
 
+from anomaly_baselines import run_baseline_calculation, get_logger
+from settings import setup_development_logging
 
 setup_development_logging()
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 # Prometheus metrics
 ANALYSES_TOTAL = Counter('analyses_total', 'Total analyses performed')
@@ -653,7 +654,7 @@ class LLMAnalyzerService:
                     'sample_log_ids': pattern.sample_log_ids,  # Store actual sample log IDs
 
                     # Preserve/update metadata
-                    'sample_stack_trace': existing.get('sample_stack_trace', ''),
+                    'sample_stack_trace': existing.get('sample_stack_trace', ''), #TODO: potential data duplication (already exists inside clikchouse logs table)
                     'is_known': is_known,  # Synced from error_catalog
                     'category': category,
                     'tags': tags,
@@ -1161,6 +1162,7 @@ Format your response clearly with sections. Be concise and actionable."""
 
 settings = Settings()
 analyzer_service: Optional[LLMAnalyzerService] = None
+scheduler: Optional[AsyncIOScheduler] = None
 
 
 @asynccontextmanager
@@ -1176,12 +1178,36 @@ async def lifespan(app: FastAPI):
     analyzer_service.setup_postgres()
     await analyzer_service.setup_http_client()
 
+    # Initialize and start the scheduler
+    scheduler = AsyncIOScheduler()
+
+    # Schedule anomaly baseline calculation for Sunday at 3 AM
+    scheduler.add_job(
+        func=lambda: run_baseline_calculation(
+            clickhouse_client=analyzer_service.ch_client,
+            postgres_session=analyzer_service.pg_session,
+            lookback_days=30
+        ),
+        trigger=CronTrigger(day_of_week='sun', hour=3, minute=0),
+        id='anomaly_baseline_calculation',
+        name='Weekly Anomaly Baseline Calculation',
+        replace_existing=True,
+        misfire_grace_time=3600  # Allow 1 hour grace period if missed
+    )
+
+    scheduler.start()
+    logger.info("scheduler_started", jobs=len(scheduler.get_jobs()))
+
     logger.info("application_started")
 
     yield
 
     # Shutdown
     logger.info("application_stopping")
+
+    if scheduler:
+        scheduler.shutdown(wait=False)
+        logger.info("scheduler_stopped")
 
     if analyzer_service and analyzer_service.http_client:
         await analyzer_service.http_client.aclose()
@@ -1298,6 +1324,132 @@ async def get_latest_report():
 async def get_metrics():
     """Prometheus metrics endpoint"""
     return generate_latest().decode('utf-8')
+
+
+@app.post("/baselines/calculate")
+async def trigger_baseline_calculation(
+    background_tasks: BackgroundTasks,
+    lookback_days: int = 30
+):
+    """
+    Manually trigger anomaly baseline calculation
+
+    Args:
+        lookback_days: Number of days to analyze (default: 30)
+
+    Returns:
+        Job ID and status
+    """
+    if analyzer_service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service not initialized"
+        )
+
+    # Run calculation in background
+    job_id = str(uuid4())
+
+    def run_calculation():
+        try:
+            result = run_baseline_calculation(
+                clickhouse_client=analyzer_service.ch_client,
+                postgres_session=analyzer_service.pg_session,
+                lookback_days=lookback_days
+            )
+            logger.info("baseline_calculation_triggered", job_id=job_id, result=result)
+        except Exception as e:
+            logger.error("baseline_calculation_failed", job_id=job_id, error=str(e))
+
+    background_tasks.add_task(run_calculation)
+
+    return {
+        "job_id": job_id,
+        "status": "triggered",
+        "message": f"Baseline calculation started (lookback: {lookback_days} days)",
+        "lookback_days": lookback_days
+    }
+
+
+@app.get("/baselines/jobs")
+async def get_baseline_jobs():
+    """Get all baseline calculation jobs from analysis_jobs table"""
+    if analyzer_service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service not initialized"
+        )
+
+    from sqlalchemy import text
+
+    query = text("""
+        SELECT
+            job_id,
+            status,
+            parameters,
+            started_at,
+            completed_at,
+            processing_time_seconds,
+            result,
+            error_message
+        FROM analysis_jobs
+        WHERE job_type = 'anomaly_baseline_calculation'
+        ORDER BY started_at DESC
+        LIMIT 20
+    """)
+
+    result = analyzer_service.pg_session.execute(query)
+    jobs = []
+
+    for row in result:
+        jobs.append({
+            "job_id": str(row[0]),
+            "status": row[1],
+            "parameters": row[2],
+            "started_at": row[3].isoformat() if row[3] else None,
+            "completed_at": row[4].isoformat() if row[4] else None,
+            "processing_time_seconds": row[5],
+            "result": row[6],
+            "error_message": row[7]
+        })
+
+    return {
+        "jobs": jobs,
+        "total": len(jobs)
+    }
+
+
+@app.get("/baselines/stats")
+async def get_baseline_stats():
+    """Get statistics about anomaly baselines"""
+    if analyzer_service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service not initialized"
+        )
+
+    # Query ClickHouse for baseline stats
+    query = """
+        SELECT
+            count() as total_baselines,
+            uniq(service) as unique_services,
+            uniq(environment) as unique_environments,
+            uniq(level) as unique_levels,
+            max(last_updated) as last_updated
+        FROM anomaly_baselines
+        FINAL
+    """
+
+    result = analyzer_service.ch_client.query(query)
+    row = result.result_rows[0] if result.result_rows else (0, 0, 0, 0, None)
+
+    return {
+        "total_baselines": row[0],
+        "unique_services": row[1],
+        "unique_environments": row[2],
+        "unique_levels": row[3],
+        "last_updated": row[4].isoformat() if row[4] else None,
+        "next_scheduled_run": "Sunday 03:00 UTC"
+    }
 
 
 if __name__ == "__main__":
