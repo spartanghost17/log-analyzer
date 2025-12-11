@@ -13,21 +13,21 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 
 from confluent_kafka import Producer, KafkaException
+from faker import Faker
 from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
+from prometheus_client import Counter, Gauge, generate_latest
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
-from prometheus_client import Counter, Gauge, generate_latest
-from faker import Faker
-from settings import setup_development_logging
-import structlog
+
+from settings import setup_development_logging, get_logger
 
 setup_development_logging()
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 # Initialize Faker
 fake = Faker()

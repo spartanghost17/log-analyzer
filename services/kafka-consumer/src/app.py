@@ -12,31 +12,30 @@ Consumes logs from Kafka and writes to ClickHouse with:
 
 import asyncio
 import json
-import signal
 import threading
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
-from collections import defaultdict
 
 import clickhouse_connect
+import pybreaker
+import structlog
 from clickhouse_connect.driver.client import Client as ClickHouseClient
 from confluent_kafka import Consumer, Producer, KafkaError, TopicPartition
 from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
+from prometheus_client import Counter, Histogram, Gauge, generate_latest
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
-from prometheus_client import Counter, Histogram, Gauge, generate_latest
-import pybreaker
-import structlog
 
-from settings import setup_development_logging
+from settings import setup_development_logging, get_logger
 
 setup_development_logging()
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 # =============================================================================
