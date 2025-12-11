@@ -1,0 +1,859 @@
+"""
+Database Service
+Manages connections to ClickHouse and PostgreSQL databases
+"""
+
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
+
+import structlog
+from sqlalchemy import create_engine, text
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+import asyncpg
+
+from ..settings import get_logger
+logger = get_logger(__name__)
+
+class DatabaseService:
+    """Service for database operations"""
+
+    def __init__(self):
+        self.logger = logger.bind(component="database_service")
+
+        # ClickHouse connection (synchronous)
+        self.clickhouse_engine = None
+
+        # PostgreSQL connection (async)
+        self.postgres_engine = None
+        self.postgres_session_maker = None
+
+    async def connect(self):
+        """Initialize database connections"""
+        self.logger.info("connecting_to_databases")
+
+        # ClickHouse (synchronous engine)
+        clickhouse_url = "clickhouse+native://admin:clickhouse_password@clickhouse:9000/logs_db"
+        self.clickhouse_engine = create_engine(clickhouse_url, pool_pre_ping=True)
+
+        # PostgreSQL (async engine)
+        postgres_url = "postgresql+asyncpg://admin:postgres_password@postgres:5432/log_analysis"
+        self.postgres_engine = create_async_engine(postgres_url, echo=False)
+        self.postgres_session_maker = sessionmaker(
+            self.postgres_engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
+
+        self.logger.info("database_connections_established")
+
+    async def disconnect(self):
+        """Close database connections"""
+        self.logger.info("disconnecting_from_databases")
+
+        if self.clickhouse_engine:
+            self.clickhouse_engine.dispose()
+
+        if self.postgres_engine:
+            await self.postgres_engine.dispose()
+
+        self.logger.info("database_connections_closed")
+
+    async def check_clickhouse_health(self) -> bool:
+        """Check ClickHouse connection health"""
+        try:
+            with self.clickhouse_engine.connect() as conn:
+                result = conn.execute(text("SELECT 1"))
+                return result.fetchone()[0] == 1
+        except Exception as e:
+            self.logger.error("clickhouse_health_check_failed", error=str(e))
+            return False
+
+    async def check_postgres_health(self) -> bool:
+        """Check PostgreSQL connection health"""
+        try:
+            async with self.postgres_engine.connect() as conn:
+                result = await conn.execute(text("SELECT 1"))
+                row = result.fetchone()
+                return row[0] == 1
+        except Exception as e:
+            self.logger.error("postgres_health_check_failed", error=str(e))
+            return False
+
+    # ========================================================================
+    # ClickHouse Queries
+    # ========================================================================
+
+    def get_logs(
+            self,
+            limit: int = 100,
+            offset: int = 0,
+            service: Optional[str] = None,
+            level: Optional[str] = None,
+            start_time: Optional[datetime] = None,
+            end_time: Optional[datetime] = None,
+            search: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Query logs from ClickHouse
+
+        Args:
+            limit: Number of logs to return
+            offset: Offset for pagination
+            service: Filter by service name
+            level: Filter by log level
+            start_time: Filter logs after this time
+            end_time: Filter logs before this time
+            search: Full-text search in message
+
+        Returns:
+            List of log records
+        """
+
+        # Build query
+        query = """
+            SELECT 
+                log_id,
+                timestamp,
+                service,
+                environment,
+                level,
+                message,
+                trace_id,
+                user_id,
+                request_id,
+                stack_trace,
+                metadata
+            FROM logs
+            WHERE 1=1
+        """
+
+        params = {}
+
+        if service:
+            query += " AND service = :service"
+            params["service"] = service
+
+        if level:
+            query += " AND level = :level"
+            params["level"] = level
+
+        if start_time:
+            query += " AND timestamp >= :start_time"
+            params["start_time"] = start_time
+
+        if end_time:
+            query += " AND timestamp <= :end_time"
+            params["end_time"] = end_time
+
+        if search:
+            query += " AND message LIKE :search"
+            params["search"] = f"%{search}%"
+
+        query += " ORDER BY timestamp DESC LIMIT :limit OFFSET :offset"
+        params["limit"] = limit
+        params["offset"] = offset
+
+        # Execute query
+        with self.clickhouse_engine.connect() as conn:
+            result = conn.execute(text(query), params)
+
+            logs = []
+            for row in result:
+                logs.append({
+                    "log_id": row[0],
+                    "timestamp": row[1].isoformat() if row[1] else None,
+                    "service": row[2],
+                    "environment": row[3],
+                    "level": row[4],
+                    "message": row[5],
+                    "trace_id": row[6],
+                    "user_id": row[7],
+                    "request_id": row[8],
+                    "stack_trace": row[9],
+                    "metadata": row[10]
+                })
+
+            return logs
+
+    def get_log_count(
+            self,
+            service: Optional[str] = None,
+            level: Optional[str] = None,
+            start_time: Optional[datetime] = None,
+            end_time: Optional[datetime] = None
+    ) -> int:
+        """Get total count of logs matching filters"""
+
+        query = "SELECT count() FROM logs WHERE 1=1"
+        params = {}
+
+        if service:
+            query += " AND service = :service"
+            params["service"] = service
+
+        if level:
+            query += " AND level = :level"
+            params["level"] = level
+
+        if start_time:
+            query += " AND timestamp >= :start_time"
+            params["start_time"] = start_time
+
+        if end_time:
+            query += " AND timestamp <= :end_time"
+            params["end_time"] = end_time
+
+        with self.clickhouse_engine.connect() as conn:
+            result = conn.execute(text(query), params)
+            return result.fetchone()[0]
+
+    def get_hourly_stats(
+            self,
+            hours: int = 24,
+            service: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get hourly log statistics"""
+
+        query = """
+            SELECT 
+                hour,
+                service,
+                total_logs,
+                error_count,
+                warn_count,
+                info_count,
+                uniqMerge(unique_traces) as unique_traces,
+                uniqMerge(unique_users) as unique_users,
+                avgMerge(avg_message_length) as avg_message_length
+            FROM logs_hourly
+            WHERE hour >= now() - INTERVAL :hours HOUR
+        """
+
+        params = {"hours": hours}
+
+        if service:
+            query += " AND service = :service"
+            params["service"] = service
+
+        query += " GROUP BY hour, service ORDER BY hour DESC, service"
+
+        with self.clickhouse_engine.connect() as conn:
+            result = conn.execute(text(query), params)
+
+            stats = []
+            for row in result:
+                stats.append({
+                    "hour": row[0].isoformat() if row[0] else None,
+                    "service": row[1],
+                    "total_logs": row[2],
+                    "error_count": row[3],
+                    "warn_count": row[4],
+                    "info_count": row[5],
+                    "unique_traces": row[6],
+                    "unique_users": row[7],
+                    "avg_message_length": float(row[8]) if row[8] else 0
+                })
+
+            return stats
+
+    def get_service_stats(self) -> List[Dict[str, Any]]:
+        """Get statistics by service"""
+
+        query = """
+            SELECT 
+                service,
+                count() as total_logs,
+                countIf(level = 'ERROR') as error_count,
+                countIf(level = 'WARN') as warn_count,
+                countIf(level = 'INFO') as info_count,
+                uniq(trace_id) as unique_traces
+            FROM logs
+            WHERE timestamp >= now() - INTERVAL 24 HOUR
+            GROUP BY service
+            ORDER BY total_logs DESC
+        """
+
+        with self.clickhouse_engine.connect() as conn:
+            result = conn.execute(text(query))
+
+            stats = []
+            for row in result:
+                stats.append({
+                    "service": row[0],
+                    "total_logs": row[1],
+                    "error_count": row[2],
+                    "warn_count": row[3],
+                    "info_count": row[4],
+                    "unique_traces": row[5]
+                })
+
+            return stats
+
+    def get_error_trends(self, hours: int = 24) -> List[Dict[str, Any]]:
+        """Get error trends over time"""
+
+        query = """
+            SELECT 
+                toStartOfHour(timestamp) as hour,
+                service,
+                count() as error_count
+            FROM logs
+            WHERE level IN ('ERROR', 'FATAL')
+              AND timestamp >= now() - INTERVAL :hours HOUR
+            GROUP BY hour, service
+            ORDER BY hour DESC, service
+        """
+
+        with self.clickhouse_engine.connect() as conn:
+            result = conn.execute(text(query), {"hours": hours})
+
+            trends = []
+            for row in result:
+                trends.append({
+                    "hour": row[0].isoformat() if row[0] else None,
+                    "service": row[1],
+                    "error_count": row[2]
+                })
+
+            return trends
+
+    # ========================================================================
+    # PostgreSQL Queries
+    # ========================================================================
+
+    async def get_analysis_reports(
+            self,
+            limit: int = 10,
+            offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get LLM analysis reports from PostgreSQL"""
+
+        query = """
+            SELECT 
+                id,
+                analysis_type,
+                time_window_start,
+                time_window_end,
+                services_analyzed,
+                total_errors,
+                unique_patterns,
+                severity,
+                summary,
+                key_findings,
+                recommendations,
+                created_at
+            FROM analysis_reports
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+        """
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(
+                text(query),
+                {"limit": limit, "offset": offset}
+            )
+
+            reports = []
+            for row in result:
+                reports.append({
+                    "id": row[0],
+                    "analysis_type": row[1],
+                    "time_window_start": row[2].isoformat() if row[2] else None,
+                    "time_window_end": row[3].isoformat() if row[3] else None,
+                    "services_analyzed": row[4],
+                    "total_errors": row[5],
+                    "unique_patterns": row[6],
+                    "severity": row[7],
+                    "summary": row[8],
+                    "key_findings": row[9],
+                    "recommendations": row[10],
+                    "created_at": row[11].isoformat() if row[11] else None
+                })
+
+            return reports
+
+    async def get_latest_report(self) -> Optional[Dict[str, Any]]:
+        """Get the most recent analysis report"""
+
+        reports = await self.get_analysis_reports(limit=1)
+        return reports[0] if reports else None
+
+    async def get_report_count(self) -> int:
+        """Get total count of analysis reports"""
+
+        query = "SELECT COUNT(*) FROM analysis_reports"
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(text(query))
+            return result.fetchone()[0]
+
+    async def get_report_by_id(self, report_id: int) -> Optional[Dict[str, Any]]:
+        """Get a specific analysis report by ID"""
+
+        query = """
+            SELECT
+                id,
+                analysis_type,
+                time_window_start,
+                time_window_end,
+                services_analyzed,
+                total_errors,
+                unique_patterns,
+                severity,
+                summary,
+                key_findings,
+                recommendations,
+                created_at
+            FROM analysis_reports
+            WHERE id = :report_id
+            LIMIT 1
+        """
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(text(query), {"report_id": report_id})
+            row = result.fetchone()
+
+            if not row:
+                return None
+
+            return {
+                "id": row[0],
+                "analysis_type": row[1],
+                "time_window_start": row[2].isoformat() if row[2] else None,
+                "time_window_end": row[3].isoformat() if row[3] else None,
+                "services_analyzed": row[4],
+                "total_errors": row[5],
+                "unique_patterns": row[6],
+                "severity": row[7],
+                "summary": row[8],
+                "key_findings": row[9],
+                "recommendations": row[10],
+                "created_at": row[11].isoformat() if row[11] else None
+            }
+
+    # ========================================================================
+    # App Config Queries
+    # ========================================================================
+
+    async def get_all_app_configs(self) -> List[Dict[str, Any]]:
+        """Get all app configurations"""
+
+        query = """
+            SELECT
+                config_id,
+                config_key,
+                config_value,
+                description,
+                is_encrypted,
+                created_at,
+                updated_at
+            FROM app_config
+            ORDER BY config_key
+        """
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(text(query))
+
+            configs = []
+            for row in result:
+                configs.append({
+                    "config_id": str(row[0]),
+                    "config_key": row[1],
+                    "config_value": row[2],
+                    "description": row[3],
+                    "is_encrypted": row[4],
+                    "created_at": row[5].isoformat() if row[5] else None,
+                    "updated_at": row[6].isoformat() if row[6] else None
+                })
+
+            return configs
+
+    async def get_app_config_by_key(self, config_key: str) -> Optional[Dict[str, Any]]:
+        """Get a specific app configuration by key"""
+
+        query = """
+            SELECT
+                config_id,
+                config_key,
+                config_value,
+                description,
+                is_encrypted,
+                created_at,
+                updated_at
+            FROM app_config
+            WHERE config_key = :config_key
+            LIMIT 1
+        """
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(text(query), {"config_key": config_key})
+            row = result.fetchone()
+
+            if not row:
+                return None
+
+            return {
+                "config_id": str(row[0]),
+                "config_key": row[1],
+                "config_value": row[2],
+                "description": row[3],
+                "is_encrypted": row[4],
+                "created_at": row[5].isoformat() if row[5] else None,
+                "updated_at": row[6].isoformat() if row[6] else None
+            }
+
+    async def create_app_config(self, config_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new app configuration"""
+
+        query = """
+            INSERT INTO app_config (config_key, config_value, description, is_encrypted)
+            VALUES (:config_key, :config_value::jsonb, :description, :is_encrypted)
+            RETURNING config_id, config_key, config_value, description, is_encrypted, created_at, updated_at
+        """
+
+        async with self.postgres_engine.begin() as conn:
+            result = await conn.execute(
+                text(query),
+                {
+                    "config_key": config_data["config_key"],
+                    "config_value": str(config_data["config_value"]),
+                    "description": config_data.get("description"),
+                    "is_encrypted": config_data.get("is_encrypted", False)
+                }
+            )
+            row = result.fetchone()
+
+            return {
+                "config_id": str(row[0]),
+                "config_key": row[1],
+                "config_value": row[2],
+                "description": row[3],
+                "is_encrypted": row[4],
+                "created_at": row[5].isoformat() if row[5] else None,
+                "updated_at": row[6].isoformat() if row[6] else None
+            }
+
+    async def update_app_config(self, config_key: str, config_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing app configuration"""
+
+        # Build dynamic update query
+        updates = []
+        params = {"config_key": config_key}
+
+        if "config_value" in config_data:
+            updates.append("config_value = :config_value::jsonb")
+            params["config_value"] = str(config_data["config_value"])
+
+        if "description" in config_data:
+            updates.append("description = :description")
+            params["description"] = config_data["description"]
+
+        if "is_encrypted" in config_data:
+            updates.append("is_encrypted = :is_encrypted")
+            params["is_encrypted"] = config_data["is_encrypted"]
+
+        query = f"""
+            UPDATE app_config
+            SET {", ".join(updates)}
+            WHERE config_key = :config_key
+            RETURNING config_id, config_key, config_value, description, is_encrypted, created_at, updated_at
+        """
+
+        async with self.postgres_engine.begin() as conn:
+            result = await conn.execute(text(query), params)
+            row = result.fetchone()
+
+            return {
+                "config_id": str(row[0]),
+                "config_key": row[1],
+                "config_value": row[2],
+                "description": row[3],
+                "is_encrypted": row[4],
+                "created_at": row[5].isoformat() if row[5] else None,
+                "updated_at": row[6].isoformat() if row[6] else None
+            }
+
+    async def delete_app_config(self, config_key: str):
+        """Delete an app configuration"""
+
+        query = "DELETE FROM app_config WHERE config_key = :config_key"
+
+        async with self.postgres_engine.begin() as conn:
+            await conn.execute(text(query), {"config_key": config_key})
+
+    # ========================================================================
+    # Services Queries
+    # ========================================================================
+
+    async def get_all_services(self, enabled: Optional[bool] = None) -> List[Dict[str, Any]]:
+        """Get all services"""
+
+        query = """
+            SELECT
+                service_id,
+                service_name,
+                description,
+                team,
+                owner_email,
+                repository_url,
+                enabled,
+                log_retention_days,
+                vectorize_logs,
+                vectorize_levels,
+                error_rate_threshold,
+                anomaly_sensitivity,
+                alert_email,
+                alert_slack_channel,
+                alert_on_new_patterns,
+                tags,
+                environment_tags,
+                created_at,
+                updated_at
+            FROM services
+        """
+
+        params = {}
+        if enabled is not None:
+            query += " WHERE enabled = :enabled"
+            params["enabled"] = enabled
+
+        query += " ORDER BY service_name"
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(text(query), params)
+
+            services = []
+            for row in result:
+                services.append({
+                    "service_id": str(row[0]),
+                    "service_name": row[1],
+                    "description": row[2],
+                    "team": row[3],
+                    "owner_email": row[4],
+                    "repository_url": row[5],
+                    "enabled": row[6],
+                    "log_retention_days": row[7],
+                    "vectorize_logs": row[8],
+                    "vectorize_levels": row[9],
+                    "error_rate_threshold": row[10],
+                    "anomaly_sensitivity": row[11],
+                    "alert_email": row[12],
+                    "alert_slack_channel": row[13],
+                    "alert_on_new_patterns": row[14],
+                    "tags": row[15],
+                    "environment_tags": row[16],
+                    "created_at": row[17].isoformat() if row[17] else None,
+                    "updated_at": row[18].isoformat() if row[18] else None
+                })
+
+            return services
+
+    async def get_service_by_name(self, service_name: str) -> Optional[Dict[str, Any]]:
+        """Get a specific service by name"""
+
+        query = """
+            SELECT
+                service_id,
+                service_name,
+                description,
+                team,
+                owner_email,
+                repository_url,
+                enabled,
+                log_retention_days,
+                vectorize_logs,
+                vectorize_levels,
+                error_rate_threshold,
+                anomaly_sensitivity,
+                alert_email,
+                alert_slack_channel,
+                alert_on_new_patterns,
+                tags,
+                environment_tags,
+                created_at,
+                updated_at
+            FROM services
+            WHERE service_name = :service_name
+            LIMIT 1
+        """
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(text(query), {"service_name": service_name})
+            row = result.fetchone()
+
+            if not row:
+                return None
+
+            return {
+                "service_id": str(row[0]),
+                "service_name": row[1],
+                "description": row[2],
+                "team": row[3],
+                "owner_email": row[4],
+                "repository_url": row[5],
+                "enabled": row[6],
+                "log_retention_days": row[7],
+                "vectorize_logs": row[8],
+                "vectorize_levels": row[9],
+                "error_rate_threshold": row[10],
+                "anomaly_sensitivity": row[11],
+                "alert_email": row[12],
+                "alert_slack_channel": row[13],
+                "alert_on_new_patterns": row[14],
+                "tags": row[15],
+                "environment_tags": row[16],
+                "created_at": row[17].isoformat() if row[17] else None,
+                "updated_at": row[18].isoformat() if row[18] else None
+            }
+
+    async def create_service(self, service_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new service"""
+
+        import json
+
+        query = """
+            INSERT INTO services (
+                service_name, description, team, owner_email, repository_url,
+                enabled, log_retention_days, vectorize_logs, vectorize_levels,
+                error_rate_threshold, anomaly_sensitivity, alert_email,
+                alert_slack_channel, alert_on_new_patterns, tags, environment_tags
+            )
+            VALUES (
+                :service_name, :description, :team, :owner_email, :repository_url,
+                :enabled, :log_retention_days, :vectorize_logs, :vectorize_levels,
+                :error_rate_threshold, :anomaly_sensitivity, :alert_email,
+                :alert_slack_channel, :alert_on_new_patterns, :tags, :environment_tags::jsonb
+            )
+            RETURNING service_id, service_name, description, team, owner_email, repository_url,
+                      enabled, log_retention_days, vectorize_logs, vectorize_levels,
+                      error_rate_threshold, anomaly_sensitivity, alert_email,
+                      alert_slack_channel, alert_on_new_patterns, tags, environment_tags,
+                      created_at, updated_at
+        """
+
+        async with self.postgres_engine.begin() as conn:
+            result = await conn.execute(
+                text(query),
+                {
+                    "service_name": service_data["service_name"],
+                    "description": service_data.get("description"),
+                    "team": service_data.get("team"),
+                    "owner_email": service_data.get("owner_email"),
+                    "repository_url": service_data.get("repository_url"),
+                    "enabled": service_data.get("enabled", True),
+                    "log_retention_days": service_data.get("log_retention_days", 90),
+                    "vectorize_logs": service_data.get("vectorize_logs", True),
+                    "vectorize_levels": service_data.get("vectorize_levels", ['WARN', 'ERROR', 'FATAL']),
+                    "error_rate_threshold": service_data.get("error_rate_threshold"),
+                    "anomaly_sensitivity": service_data.get("anomaly_sensitivity", 'medium'),
+                    "alert_email": service_data.get("alert_email", []),
+                    "alert_slack_channel": service_data.get("alert_slack_channel"),
+                    "alert_on_new_patterns": service_data.get("alert_on_new_patterns", True),
+                    "tags": service_data.get("tags", []),
+                    "environment_tags": json.dumps(service_data.get("environment_tags")) if service_data.get("environment_tags") else None
+                }
+            )
+            row = result.fetchone()
+
+            return {
+                "service_id": str(row[0]),
+                "service_name": row[1],
+                "description": row[2],
+                "team": row[3],
+                "owner_email": row[4],
+                "repository_url": row[5],
+                "enabled": row[6],
+                "log_retention_days": row[7],
+                "vectorize_logs": row[8],
+                "vectorize_levels": row[9],
+                "error_rate_threshold": row[10],
+                "anomaly_sensitivity": row[11],
+                "alert_email": row[12],
+                "alert_slack_channel": row[13],
+                "alert_on_new_patterns": row[14],
+                "tags": row[15],
+                "environment_tags": row[16],
+                "created_at": row[17].isoformat() if row[17] else None,
+                "updated_at": row[18].isoformat() if row[18] else None
+            }
+
+    async def update_service(self, service_name: str, service_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing service"""
+
+        import json
+
+        # Build dynamic update query
+        updates = []
+        params = {"service_name": service_name}
+
+        field_mapping = {
+            "description": "description",
+            "team": "team",
+            "owner_email": "owner_email",
+            "repository_url": "repository_url",
+            "enabled": "enabled",
+            "log_retention_days": "log_retention_days",
+            "vectorize_logs": "vectorize_logs",
+            "vectorize_levels": "vectorize_levels",
+            "error_rate_threshold": "error_rate_threshold",
+            "anomaly_sensitivity": "anomaly_sensitivity",
+            "alert_email": "alert_email",
+            "alert_slack_channel": "alert_slack_channel",
+            "alert_on_new_patterns": "alert_on_new_patterns",
+            "tags": "tags"
+        }
+
+        for field, db_field in field_mapping.items():
+            if field in service_data:
+                updates.append(f"{db_field} = :{field}")
+                params[field] = service_data[field]
+
+        if "environment_tags" in service_data:
+            updates.append("environment_tags = :environment_tags::jsonb")
+            params["environment_tags"] = json.dumps(service_data["environment_tags"]) if service_data["environment_tags"] else None
+
+        query = f"""
+            UPDATE services
+            SET {", ".join(updates)}
+            WHERE service_name = :service_name
+            RETURNING service_id, service_name, description, team, owner_email, repository_url,
+                      enabled, log_retention_days, vectorize_logs, vectorize_levels,
+                      error_rate_threshold, anomaly_sensitivity, alert_email,
+                      alert_slack_channel, alert_on_new_patterns, tags, environment_tags,
+                      created_at, updated_at
+        """
+
+        async with self.postgres_engine.begin() as conn:
+            result = await conn.execute(text(query), params)
+            row = result.fetchone()
+
+            return {
+                "service_id": str(row[0]),
+                "service_name": row[1],
+                "description": row[2],
+                "team": row[3],
+                "owner_email": row[4],
+                "repository_url": row[5],
+                "enabled": row[6],
+                "log_retention_days": row[7],
+                "vectorize_logs": row[8],
+                "vectorize_levels": row[9],
+                "error_rate_threshold": row[10],
+                "anomaly_sensitivity": row[11],
+                "alert_email": row[12],
+                "alert_slack_channel": row[13],
+                "alert_on_new_patterns": row[14],
+                "tags": row[15],
+                "environment_tags": row[16],
+                "created_at": row[17].isoformat() if row[17] else None,
+                "updated_at": row[18].isoformat() if row[18] else None
+            }
+
+    async def delete_service(self, service_name: str):
+        """Delete a service"""
+
+        query = "DELETE FROM services WHERE service_name = :service_name"
+
+        async with self.postgres_engine.begin() as conn:
+            await conn.execute(text(query), {"service_name": service_name})
