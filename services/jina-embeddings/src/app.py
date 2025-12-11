@@ -16,19 +16,19 @@ import hashlib
 import json
 import time
 import uuid
-from contextvars import ContextVar
 from contextlib import asynccontextmanager
-from typing import List, Optional, Dict, Any
+from contextvars import ContextVar
+from typing import List, Optional
 
 import httpx
 import redis.asyncio as redis
 import structlog
 from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 from pybreaker import CircuitBreaker, CircuitBreakerError
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -37,10 +37,10 @@ from tenacity import (
     before_sleep_log
 )
 
-from settings import setup_development_logging
+from settings import setup_development_logging, get_logger
 
 setup_development_logging()
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 # Request ID context variable for tracing
 request_id_var: ContextVar[str] = ContextVar('request_id', default='')
@@ -60,9 +60,9 @@ class Settings(BaseSettings):
     # Jina AI settings
     jina_api_key: str = Field(default="", validation_alias="JINA_API_KEY")
     jina_model: str = Field(default="jina-embeddings-v3", validation_alias="JINA_MODEL")
+    jina_task_type: str = Field(default="text-matching", validation_alias="JINA_TASK_TYPE")
     jina_api_url: str = Field(default="https://api.jina.ai/v1/embeddings", validation_alias="JINA_API_URL")
     jina_timeout: int = Field(default=30, validation_alias="JINA_TIMEOUT")
-    jina_task_type: str = Field(default="text-matching", validation_alias="JINA_TASK_TYPE")
 
     # Performance settings
     max_batch_size: int = Field(default=100, validation_alias="MAX_BATCH_SIZE")
