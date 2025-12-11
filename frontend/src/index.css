@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background-dark: #101c22;
+  --color-background-light: #f6f7f8;
+  --color-panel-dark: #16232b;
+  --color-panel-light: #2d2b15;
+  --color-border-dark: #233c48;
+  --color-primary: #facc15;
+  --color-primary-alt: #2badee;
+  --color-text-muted: #92b7c9;
+  --color-success: #22c55e;
+  --color-warning: #f97316;
+  --color-error: #facc15;
+
+  --font-family-display: Manrope, sans-serif;
+  --font-family-body: "Noto Sans", sans-serif;
+  --font-family-mono: "JetBrains Mono", monospace;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--color-background-dark);
+    color: white;
+    font-family: var(--font-family-body);
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-family-display);
+  }
+}
+
+/* Custom Scrollbar for 'Tactical' feel */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: var(--color-background-dark);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-border-dark);
+  border-radius: 9999px;
+  border: 2px solid var(--color-background-dark);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-primary);
+}
