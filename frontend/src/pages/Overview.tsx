@@ -198,7 +198,7 @@ export const Overview = () => {
               monitoring active. Check error patterns and anomalies for optimal
               performance.
             </p>
-            <button className="mt-4 text-xs font-bold text-primary hover:underline flex items-center gap-1 z-10 relative">
+            <button className="mt-4 text-xs font-bold text-primary hover:underline flex items-center gap-1 z-10 relative cursor-pointer">
               View Full Report{" "}
               <span className="material-symbols-outlined text-[14px]">
                 arrow_forward
@@ -214,7 +214,7 @@ export const Overview = () => {
           <h3 className="text-lg font-bold text-white">
             Recent Critical Anomalies
           </h3>
-          <button className="text-xs font-bold text-text-muted hover:text-white">
+          <button className="text-xs font-bold text-text-muted hover:text-white cursor-pointer">
             View All
           </button>
         </div>
@@ -291,7 +291,7 @@ export const Overview = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button className="text-primary hover:text-white">
+                      <button className="text-primary hover:text-white cursor-pointer">
                         <span className="material-symbols-outlined text-[20px]">
                           search
                         </span>

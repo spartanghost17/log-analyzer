@@ -33,7 +33,7 @@ export const Reports = () => {
             View AI-generated log analysis reports and identify trends over time.
           </p>
         </div>
-        <button className="flex items-center gap-2 rounded-lg bg-primary hover:bg-primary/90 text-background-dark px-4 py-2 transition-colors font-bold text-sm">
+        <button className="flex items-center gap-2 rounded-lg bg-primary hover:bg-primary/90 text-background-dark px-4 py-2 transition-colors font-bold text-sm cursor-pointer">
           <span className="material-symbols-outlined">add</span>
           Generate New Report
         </button>
@@ -55,7 +55,7 @@ export const Reports = () => {
               </div>
             </div>
             <div className="flex gap-2">
-              <button className="text-xs text-primary font-bold hover:underline">View Full Report</button>
+              <button className="text-xs text-primary font-bold hover:underline cursor-pointer">View Full Report</button>
             </div>
           </div>
 
@@ -117,7 +117,7 @@ export const Reports = () => {
         <div className="flex items-center justify-between border-b border-border-dark px-6 py-4">
           <h3 className="text-lg font-bold text-white">Report History</h3>
           <div className="flex items-center gap-2">
-            <select className="bg-background-dark border border-border-dark rounded-lg px-3 py-1.5 text-white text-sm">
+            <select className="bg-background-dark border border-border-dark rounded-lg px-3 py-1.5 text-white text-sm cursor-pointer">
               <option>Last 30 days</option>
               <option>Last 7 days</option>
               <option>Last 24 hours</option>
@@ -168,7 +168,7 @@ export const Reports = () => {
                       {report.generation_time_seconds.toFixed(1)}s
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button className="text-primary hover:text-white transition-colors">
+                      <button className="text-primary hover:text-white transition-colors cursor-pointer">
                         <span className="material-symbols-outlined text-[20px]">visibility</span>
                       </button>
                     </td>

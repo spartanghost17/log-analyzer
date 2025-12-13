@@ -134,12 +134,17 @@ export const LogStream = () => {
 
   const getLevelColor = (level: string) => {
     switch (level) {
-      case "ERROR":
       case "FATAL":
         return {
-          bg: "bg-accent-yellow/20",
-          text: "text-accent-yellow",
-          border: "border-accent-yellow/40",
+          bg: "bg-red-500/20",
+          text: "text-red-400",
+          border: "border-red-500/40",
+        };
+      case "ERROR":
+        return {
+          bg: "bg-yellow-500/20",
+          text: "text-yellow-400",
+          border: "border-yellow-500/40",
         };
       case "WARN":
         return {
@@ -149,21 +154,21 @@ export const LogStream = () => {
         };
       case "INFO":
         return {
-          bg: "bg-primary-alt/10",
-          text: "text-primary-alt",
-          border: "border-primary-alt/20",
+          bg: "bg-blue-500/10",
+          text: "text-blue-400",
+          border: "border-blue-500/20",
         };
       case "DEBUG":
         return {
-          bg: "bg-gray-700",
+          bg: "bg-gray-500/10",
           text: "text-gray-400",
-          border: "border-gray-600",
+          border: "border-gray-500/20",
         };
       default:
         return {
-          bg: "bg-gray-700",
+          bg: "bg-gray-500/10",
           text: "text-gray-400",
-          border: "border-gray-600",
+          border: "border-gray-500/20",
         };
     }
   };
@@ -195,7 +200,7 @@ export const LogStream = () => {
           <div className="flex gap-2">
             <button
               onClick={() => setIsPaused(!isPaused)}
-              className="flex items-center gap-2 px-4 h-9 bg-border-dark hover:bg-white/10 text-white text-sm font-medium rounded-lg border border-transparent transition-all"
+              className="flex items-center gap-2 px-4 h-9 bg-border-dark hover:bg-white/10 text-white text-sm font-medium rounded-lg border border-transparent transition-all cursor-pointer"
             >
               <span className="material-symbols-outlined text-[18px]">
                 {isPaused ? "play_arrow" : "pause"}
@@ -206,7 +211,7 @@ export const LogStream = () => {
             </button>
             <button
               onClick={() => setLogs([])}
-              className="flex items-center gap-2 px-4 h-9 bg-primary-alt hover:bg-blue-500 text-white text-sm font-bold rounded-lg shadow-lg shadow-primary-alt/20 transition-all"
+              className="flex items-center gap-2 px-4 h-9 bg-primary-alt hover:bg-blue-500 text-white text-sm font-bold rounded-lg shadow-lg shadow-primary-alt/20 transition-all cursor-pointer"
             >
               <span className="material-symbols-outlined text-[18px]">
                 refresh
@@ -312,7 +317,9 @@ export const LogStream = () => {
 
         {filteredLogs.map((log, index) => {
           const levelColors = getLevelColor(log.level);
-          const isError = log.level === "ERROR" || log.level === "FATAL";
+          const isFatal = log.level === "FATAL";
+          const isError = log.level === "ERROR";
+          const isWarn = log.level === "WARN";
           const isExpanded = selectedLog?.log_id === log.log_id;
 
           return (
@@ -327,14 +334,24 @@ export const LogStream = () => {
               <div
                 onClick={() => setSelectedLog(isExpanded ? null : log)}
                 className={`flex items-start px-4 py-2 border-b transition-colors cursor-pointer group/row ${
-                  isError
-                    ? `${levelColors.bg} border-accent-yellow/20 hover:bg-accent-yellow/10`
+                  isFatal
+                    ? "bg-red-500/10 border-red-500/20 hover:bg-red-500/15"
+                    : isError
+                    ? "bg-yellow-500/10 border-yellow-500/20 hover:bg-yellow-500/15"
+                    : isWarn
+                    ? "bg-orange-500/5 border-orange-500/10 hover:bg-orange-500/10"
                     : "border-white/5 hover:bg-white/5"
                 } ${isExpanded ? "border-l-2 border-primary-alt" : ""}`}
               >
                 <div
                   className={`w-36 shrink-0 font-mono text-xs pt-0.5 ${
-                    isError ? "text-accent-yellow" : "text-text-muted"
+                    isFatal
+                      ? "text-red-400"
+                      : isError
+                      ? "text-yellow-400"
+                      : isWarn
+                      ? "text-orange-400"
+                      : "text-text-muted"
                   }`}
                 >
                   {format(new Date(log.timestamp), "MMM dd HH:mm:ss.SSS")}
@@ -348,12 +365,28 @@ export const LogStream = () => {
                 </div>
                 <div
                   className={`w-32 shrink-0 hidden md:block text-xs pt-0.5 ${
-                    isError ? "text-accent-yellow" : "text-text-muted"
+                    isFatal
+                      ? "text-red-400"
+                      : isError
+                      ? "text-yellow-400"
+                      : isWarn
+                      ? "text-orange-400"
+                      : "text-text-muted"
                   }`}
                 >
                   {log.service}
                 </div>
-                <div className="flex-1 font-mono text-sm text-gray-300 break-all leading-relaxed">
+                <div
+                  className={`flex-1 font-mono text-sm break-all leading-relaxed ${
+                    isFatal
+                      ? "text-red-300"
+                      : isError
+                      ? "text-yellow-300"
+                      : isWarn
+                      ? "text-orange-300"
+                      : "text-gray-300"
+                  }`}
+                >
                   {log.message}
                 </div>
                 <div className="w-8 shrink-0 flex justify-end opacity-0 group-hover/row:opacity-100">

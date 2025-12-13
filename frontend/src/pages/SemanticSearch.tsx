@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
+import toast from "react-hot-toast";
 import { api, type SemanticSearchResult } from "../api/client";
 import { mockApi } from "../api/mock";
 import { format } from "date-fns";
@@ -8,17 +10,32 @@ import { format } from "date-fns";
 const USE_MOCK_API = true;
 
 export const SemanticSearch = () => {
+  const location = useLocation();
+  const locationState = location.state as any;
+
+  // Initialize state from navigation or defaults
   const [searchQuery, setSearchQuery] = useState(
-    "Show me authentication failures related to the payment gateway timeout"
+    locationState?.initialQuery || "Show me authentication failures related to the payment gateway timeout"
   );
   const [selectedResult, setSelectedResult] =
     useState<SemanticSearchResult | null>(null);
   const [filters, setFilters] = useState({
-    level: "ERROR",
-    service: "",
-    timeRange: "1h",
+    level: locationState?.initialFilters?.level || "ERROR",
+    service: locationState?.initialFilters?.service || "",
+    timeRange: locationState?.initialFilters?.timeRange || "1h",
     patternGrouping: true,
   });
+
+  // Auto-trigger search if coming from anomaly investigation
+  useEffect(() => {
+    if (locationState?.fromAnomaly && locationState?.initialQuery) {
+      // Trigger search automatically with a small delay
+      const timer = setTimeout(() => {
+        handleSearch();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [locationState?.fromAnomaly]);
 
   const searchMutation = useMutation({
     mutationFn: (query: string) =>
@@ -44,6 +61,22 @@ export const SemanticSearch = () => {
       if (searchMutation.data?.results?.length) {
         setSelectedResult(searchMutation.data.results[0]);
       }
+    }
+  };
+
+  const handleCopyLog = async () => {
+    if (!selectedResult) return;
+
+    try {
+      const logData = JSON.stringify(selectedResult, null, 2);
+      await navigator.clipboard.writeText(logData);
+      toast.success("Log copied to clipboard!", {
+        icon: "📋",
+      });
+    } catch (error) {
+      toast.error("Failed to copy to clipboard", {
+        icon: "✕",
+      });
     }
   };
 
@@ -90,6 +123,15 @@ export const SemanticSearch = () => {
                 Investigate logs using natural language queries and AI-driven
                 insights.
               </p>
+              {/* Anomaly Investigation Banner */}
+              {locationState?.fromAnomaly && (
+                <div className="mt-3 flex items-center gap-2 text-xs">
+                  <span className="material-symbols-outlined text-primary text-[16px]">science</span>
+                  <span className="text-primary font-medium">
+                    Investigating anomaly: <span className="text-white">{locationState.anomalyId}</span>
+                  </span>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-3 rounded-lg border border-[#686831] bg-[#2a2a15] px-4 py-2">
               <span className="material-symbols-outlined text-primary">
@@ -126,7 +168,7 @@ export const SemanticSearch = () => {
                   <button
                     onClick={handleSearch}
                     disabled={searchMutation.isPending}
-                    className="p-2 text-text-muted hover:text-white transition-colors rounded-lg disabled:opacity-50"
+                    className="p-2 text-text-muted hover:text-white transition-colors rounded-lg disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                   >
                     <span className="material-symbols-outlined">search</span>
                   </button>
@@ -142,7 +184,7 @@ export const SemanticSearch = () => {
               onChange={(e) =>
                 setFilters({ ...filters, level: e.target.value })
               }
-              className="flex h-8 shrink-0 items-center gap-x-2 rounded-lg bg-[#2a2a15] border border-border-dark hover:border-[#686831] px-3 transition-colors text-white text-xs font-medium"
+              className="flex h-8 shrink-0 items-center gap-x-2 rounded-lg bg-[#2a2a15] border border-border-dark hover:border-[#686831] px-3 transition-colors text-white text-xs font-medium cursor-pointer"
             >
               <option value="">All Levels</option>
               <option value="ERROR">Level: Error</option>
@@ -157,7 +199,7 @@ export const SemanticSearch = () => {
                   patternGrouping: !filters.patternGrouping,
                 })
               }
-              className={`flex h-8 shrink-0 items-center gap-x-2 rounded-lg bg-[#2a2a15] border px-3 transition-colors ${
+              className={`flex h-8 shrink-0 items-center gap-x-2 rounded-lg bg-[#2a2a15] border px-3 transition-colors cursor-pointer ${
                 filters.patternGrouping
                   ? "border-primary/40"
                   : "border-border-dark hover:border-[#686831]"
@@ -292,7 +334,7 @@ export const SemanticSearch = () => {
           {selectedResult && (
             <>
               {/* AI Insight Header */}
-              <div className="sticky top-0 z-10 bg-[#1a1a0c]/95 backdrop-blur-sm border-b border-border-dark px-8 py-4 flex items-center justify-between">
+              <div className="sticky top-0 z-20 bg-[#1a1a0c] border-b border-border-dark px-8 py-4 flex items-center justify-between shadow-lg shadow-black/50">
                 <div className="flex items-center gap-3">
                   <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
                     <span className="material-symbols-outlined">
@@ -309,7 +351,7 @@ export const SemanticSearch = () => {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button className="flex items-center gap-2 rounded-md bg-[#2a2a15] border border-border-dark hover:border-text-muted px-3 py-1.5 transition-colors">
+                  <button className="flex items-center gap-2 rounded-md bg-[#2a2a15] border border-border-dark hover:border-text-muted px-3 py-1.5 transition-colors cursor-pointer">
                     <span className="material-symbols-outlined text-text-muted text-sm">
                       share
                     </span>
@@ -389,7 +431,10 @@ export const SemanticSearch = () => {
                       Selected Log Data
                     </h4>
                     <div className="flex gap-2">
-                      <button className="text-xs text-text-muted hover:text-white flex items-center gap-1">
+                      <button
+                        onClick={handleCopyLog}
+                        className="text-xs text-text-muted hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+                      >
                         <span className="material-symbols-outlined text-sm">
                           content_copy
                         </span>{" "}
