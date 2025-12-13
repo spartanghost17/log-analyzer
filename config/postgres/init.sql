@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS anomaly_alerts (
     acknowledged_by VARCHAR(255),
     acknowledged_at TIMESTAMP WITH TIME ZONE,
     resolution_notes TEXT,
+    resolved_by VARCHAR(255),
     resolved_at TIMESTAMP WITH TIME ZONE,
     
     -- Notification tracking
