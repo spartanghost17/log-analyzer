@@ -19,18 +19,27 @@ router = APIRouter()
 # ============================================================================
 
 class AnalysisReport(BaseModel):
-    """LLM-generated analysis report"""
-    id: int
-    analysis_type: str
-    time_window_start: str
-    time_window_end: str
-    services_analyzed: List[str]
-    total_errors: int
-    unique_patterns: int
-    severity: str
-    summary: str
-    key_findings: List[str]
-    recommendations: List[str]
+    """LLM-generated analysis report from nightly_reports table"""
+    report_id: str
+    report_date: str
+    start_time: str
+    end_time: str
+    total_logs_processed: int
+    error_count: int
+    warning_count: int
+    unique_error_patterns: int
+    new_error_patterns: int
+    anomalies_detected: int
+    critical_issues: int
+    executive_summary: str
+    top_issues: Optional[List[dict]] = None
+    recommendations: Optional[List[str]] = None
+    affected_services: Optional[List[str]] = None
+    generation_time_seconds: float
+    llm_model_used: Optional[str] = None
+    tokens_used: Optional[int] = None
+    status: str
+    error_message: Optional[str] = None
     created_at: str
 
 
@@ -130,11 +139,11 @@ async def get_latest_report(
 
 @router.get("/{report_id}", response_model=AnalysisReport)
 async def get_report_by_id(
-        report_id: int,
+        report_id: str,
         db: DatabaseService = Depends(get_db),
         cache: CacheService = Depends(get_cache)
 ):
-    """Get a specific analysis report by ID"""
+    """Get a specific analysis report by ID (UUID)"""
 
     # Try cache
     cache_key = f"reports:{report_id}"

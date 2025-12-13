@@ -329,24 +329,33 @@ class DatabaseService:
             limit: int = 10,
             offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get LLM analysis reports from PostgreSQL"""
+        """Get LLM analysis reports from PostgreSQL nightly_reports table"""
 
         query = """
             SELECT 
-                id,
-                analysis_type,
-                time_window_start,
-                time_window_end,
-                services_analyzed,
-                total_errors,
-                unique_patterns,
-                severity,
-                summary,
-                key_findings,
+                report_id,
+                report_date,
+                start_time,
+                end_time,
+                total_logs_processed,
+                error_count,
+                warning_count,
+                unique_error_patterns,
+                new_error_patterns,
+                anomalies_detected,
+                critical_issues,
+                executive_summary,
+                top_issues,
                 recommendations,
+                affected_services,
+                generation_time_seconds,
+                llm_model_used,
+                tokens_used,
+                status,
+                error_message,
                 created_at
-            FROM analysis_reports
-            ORDER BY created_at DESC
+            FROM nightly_reports
+            ORDER BY report_date DESC
             LIMIT :limit OFFSET :offset
         """
 
@@ -359,18 +368,27 @@ class DatabaseService:
             reports = []
             for row in result:
                 reports.append({
-                    "id": row[0],
-                    "analysis_type": row[1],
-                    "time_window_start": row[2].isoformat() if row[2] else None,
-                    "time_window_end": row[3].isoformat() if row[3] else None,
-                    "services_analyzed": row[4],
-                    "total_errors": row[5],
-                    "unique_patterns": row[6],
-                    "severity": row[7],
-                    "summary": row[8],
-                    "key_findings": row[9],
-                    "recommendations": row[10],
-                    "created_at": row[11].isoformat() if row[11] else None
+                    "report_id": str(row[0]),
+                    "report_date": row[1].isoformat() if row[1] else None,
+                    "start_time": row[2].isoformat() if row[2] else None,
+                    "end_time": row[3].isoformat() if row[3] else None,
+                    "total_logs_processed": row[4] or 0,
+                    "error_count": row[5] or 0,
+                    "warning_count": row[6] or 0,
+                    "unique_error_patterns": row[7] or 0,
+                    "new_error_patterns": row[8] or 0,
+                    "anomalies_detected": row[9] or 0,
+                    "critical_issues": row[10] or 0,
+                    "executive_summary": row[11] or "",
+                    "top_issues": row[12] if row[12] else [],
+                    "recommendations": row[13] if row[13] else [],
+                    "affected_services": row[14] if row[14] else [],
+                    "generation_time_seconds": float(row[15]) if row[15] else 0.0,
+                    "llm_model_used": row[16],
+                    "tokens_used": row[17],
+                    "status": row[18] or "completed",
+                    "error_message": row[19],
+                    "created_at": row[20].isoformat() if row[20] else None
                 })
 
             return reports
@@ -384,31 +402,40 @@ class DatabaseService:
     async def get_report_count(self) -> int:
         """Get total count of analysis reports"""
 
-        query = "SELECT COUNT(*) FROM analysis_reports"
+        query = "SELECT COUNT(*) FROM nightly_reports"
 
         async with self.postgres_engine.connect() as conn:
             result = await conn.execute(text(query))
             return result.fetchone()[0]
 
-    async def get_report_by_id(self, report_id: int) -> Optional[Dict[str, Any]]:
+    async def get_report_by_id(self, report_id: str) -> Optional[Dict[str, Any]]:
         """Get a specific analysis report by ID"""
 
         query = """
             SELECT
-                id,
-                analysis_type,
-                time_window_start,
-                time_window_end,
-                services_analyzed,
-                total_errors,
-                unique_patterns,
-                severity,
-                summary,
-                key_findings,
+                report_id,
+                report_date,
+                start_time,
+                end_time,
+                total_logs_processed,
+                error_count,
+                warning_count,
+                unique_error_patterns,
+                new_error_patterns,
+                anomalies_detected,
+                critical_issues,
+                executive_summary,
+                top_issues,
                 recommendations,
+                affected_services,
+                generation_time_seconds,
+                llm_model_used,
+                tokens_used,
+                status,
+                error_message,
                 created_at
-            FROM analysis_reports
-            WHERE id = :report_id
+            FROM nightly_reports
+            WHERE report_id = :report_id
             LIMIT 1
         """
 
@@ -420,18 +447,27 @@ class DatabaseService:
                 return None
 
             return {
-                "id": row[0],
-                "analysis_type": row[1],
-                "time_window_start": row[2].isoformat() if row[2] else None,
-                "time_window_end": row[3].isoformat() if row[3] else None,
-                "services_analyzed": row[4],
-                "total_errors": row[5],
-                "unique_patterns": row[6],
-                "severity": row[7],
-                "summary": row[8],
-                "key_findings": row[9],
-                "recommendations": row[10],
-                "created_at": row[11].isoformat() if row[11] else None
+                "report_id": str(row[0]),
+                "report_date": row[1].isoformat() if row[1] else None,
+                "start_time": row[2].isoformat() if row[2] else None,
+                "end_time": row[3].isoformat() if row[3] else None,
+                "total_logs_processed": row[4] or 0,
+                "error_count": row[5] or 0,
+                "warning_count": row[6] or 0,
+                "unique_error_patterns": row[7] or 0,
+                "new_error_patterns": row[8] or 0,
+                "anomalies_detected": row[9] or 0,
+                "critical_issues": row[10] or 0,
+                "executive_summary": row[11] or "",
+                "top_issues": row[12] if row[12] else [],
+                "recommendations": row[13] if row[13] else [],
+                "affected_services": row[14] if row[14] else [],
+                "generation_time_seconds": float(row[15]) if row[15] else 0.0,
+                "llm_model_used": row[16],
+                "tokens_used": row[17],
+                "status": row[18] or "completed",
+                "error_message": row[19],
+                "created_at": row[20].isoformat() if row[20] else None
             }
 
     # ========================================================================
