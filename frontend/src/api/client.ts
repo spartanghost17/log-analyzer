@@ -206,10 +206,6 @@ export const api = {
     return data;
   },
 
-  // Throughput Time-Series Data
-  // NOTE: This endpoint may not be implemented in the backend yet.
-  // Expected to return 24h time-series data for the throughput chart.
-  // If this endpoint doesn't exist, the backend needs to implement it.
   getThroughput: async (): Promise<MetricPoint[]> => {
     const { data } = await apiClient.get("/api/metrics/throughput");
     return data;
@@ -223,6 +219,18 @@ export const api = {
     limit?: number;
   }): Promise<AnomaliesResponse> => {
     const { data } = await apiClient.get("/api/anomalies", { params });
+    return data;
+  },
+
+  acknowledgeAnomaly: async (alertId: string): Promise<Anomaly> => {
+    const { data } = await apiClient.patch(
+      `/api/anomalies/${alertId}/acknowledge`
+    );
+    return data;
+  },
+
+  resolveAnomaly: async (alertId: string): Promise<Anomaly> => {
+    const { data } = await apiClient.patch(`/api/anomalies/${alertId}/resolve`);
     return data;
   },
 

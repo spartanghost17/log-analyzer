@@ -358,6 +358,22 @@ export const mockApi = {
     };
   },
 
+  // Acknowledge anomaly (mock)
+  acknowledgeAnomaly: async (alertId: string): Promise<Anomaly> => {
+    await new Promise((r) => setTimeout(r, 800));
+    const anomaly = mockAnomalies.find((a) => a.alert_id === alertId);
+    if (!anomaly) throw new Error("Anomaly not found");
+    return { ...anomaly, status: "acknowledged" };
+  },
+
+  // Resolve anomaly (mock)
+  resolveAnomaly: async (alertId: string): Promise<Anomaly> => {
+    await new Promise((r) => setTimeout(r, 800));
+    const anomaly = mockAnomalies.find((a) => a.alert_id === alertId);
+    if (!anomaly) throw new Error("Anomaly not found");
+    return { ...anomaly, status: "resolved" };
+  },
+
   // Throughput data
   getThroughput: async (): Promise<MetricPoint[]> => {
     await new Promise((r) => setTimeout(r, 400));
