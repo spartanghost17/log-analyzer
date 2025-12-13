@@ -94,14 +94,25 @@ export interface PatternsResponse {
 export interface Report {
   report_id: string;
   report_date: string;
+  start_time: string;
+  end_time: string;
   total_logs_processed: number;
   error_count: number;
+  warning_count: number;
   unique_error_patterns: number;
+  new_error_patterns: number;
   anomalies_detected: number;
+  critical_issues: number;
   executive_summary: string;
-  generation_time_seconds: number;
-  top_issues?: ErrorPattern[];
+  top_issues?: any[];
   recommendations?: string[];
+  affected_services?: string[];
+  generation_time_seconds: number;
+  llm_model_used?: string;
+  tokens_used?: number;
+  status: string;
+  error_message?: string;
+  created_at: string;
 }
 
 export interface ReportsResponse {
