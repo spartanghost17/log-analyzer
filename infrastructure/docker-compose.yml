@@ -326,6 +326,7 @@ services:
       POSTGRES_PASSWORD: postgres_password
       POSTGRES_DB: log_analysis
       ANALYSIS_WINDOW_HOURS: 24
+      ANOMALY_Z_SCORE_THRESHOLD: 2.5
       API_HOST: "0.0.0.0"
       API_PORT: "8002"
     networks:
@@ -342,7 +343,7 @@ services:
   # PHASE 2: VECTOR SEARCH & EMBEDDINGS
   # ============================================
 
-  # Jina Embeddings Service - Generates text embeddings via Jina AI API
+ # Jina Embeddings Service - Generates text embeddings via Jina AI API
   jina-embeddings:
     build:
       context: ./services/jina-embeddings
@@ -354,12 +355,24 @@ services:
       SERVICE_NAME: jina-embeddings
       HOST: "0.0.0.0"
       PORT: "8003"
-      JINA_API_KEY: "${JINA_API_KEY}"  # Set in .env file
-      JINA_MODEL: "jina-embeddings-v2-base-en"
+      JINA_API_KEY: ${JINA_API_KEY}  # Set in .env file
+      JINA_MODEL: "jina-embeddings-v3" #"jina-embeddings-v2-base-en"
+      JINA_TASK_TYPE: "text-matching"
       JINA_API_URL: "https://api.jina.ai/v1/embeddings"
-      JINA_TIMEOUT: "30"
-      MAX_BATCH_SIZE: "100"
-      MAX_TEXT_LENGTH: "8192"
+      JINA_TIMEOUT: 30
+      MAX_BATCH_SIZE: 100
+      MAX_TEXT_LENGTH: 8192
+      REDIS_HOST: "redis"
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      CACHE_TTL: 86400
+      CACHE_ENABLED: True
+      CIRCUIT_BREAKER_FAIL_MAX: 5
+      CIRCUIT_BREAKER_TIMEOUT: 60
+      RETRY_ATTEMPTS: 3
+      RETRY_MIN_WAIT: 1
+      RETRY_MAX_WAIT: 10
+      LOG_LEVEL: "INFO"
     networks:
       - log-network
     restart: unless-stopped
@@ -370,7 +383,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # Vectorization Worker - Processes logs and stores in Qdrant
+#  # Vectorization Worker - Processes logs and stores in Qdrant
   vectorization-worker:
     build:
       context: ./services/vectorization-worker
@@ -457,8 +470,11 @@ services:
       # Redis
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_DB: 0
+      CACHE_TTL: 300 # 300sec = 5 minutes
       # Jina
       JINA_SERVICE_URL: http://jina-embeddings:8003
+      JINA_TIMEOUT: 30
     networks:
       - log-network
     restart: unless-stopped
