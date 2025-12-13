@@ -13,7 +13,9 @@ from sqlalchemy.orm import sessionmaker
 import asyncpg
 
 from ..settings import get_logger
+
 logger = get_logger(__name__)
+
 
 class DatabaseService:
     """Service for database operations"""
@@ -857,3 +859,340 @@ class DatabaseService:
 
         async with self.postgres_engine.begin() as conn:
             await conn.execute(text(query), {"service_name": service_name})
+
+    # ========================================================================
+    # Anomaly Alerts Queries (PostgreSQL)
+    # ========================================================================
+
+    async def get_anomalies(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        service: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Query anomaly alerts from PostgreSQL"""
+
+        import json
+
+        # Build WHERE clause
+        where_clauses = []
+        params = {"limit": limit, "offset": offset}
+
+        if severity:
+            where_clauses.append("severity = :severity")
+            params["severity"] = severity
+
+        if status:
+            where_clauses.append("status = :status")
+            params["status"] = status
+
+        if service:
+            where_clauses.append("service = :service")
+            params["service"] = service
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        query = f"""
+            SELECT
+                alert_id,
+                anomaly_type,
+                detected_at,
+                service,
+                environment,
+                severity,
+                description,
+                confidence_score,
+                status,
+                metrics,
+                llm_analysis,
+                suggested_actions,
+                acknowledged_by,
+                acknowledged_at,
+                resolved_by,
+                resolved_at
+            FROM anomaly_alerts
+            {where_sql}
+            ORDER BY detected_at DESC
+            LIMIT :limit OFFSET :offset
+        """
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(text(query), params)
+            rows = result.fetchall()
+
+            return [
+                {
+                    "alert_id": str(row[0]),
+                    "anomaly_type": row[1],
+                    "detected_at": row[2].isoformat() if row[2] else None,
+                    "service": row[3],
+                    "environment": row[4],
+                    "severity": row[5],
+                    "description": row[6],
+                    "confidence_score": float(row[7]) if row[7] else 0.0,
+                    "status": row[8],
+                    "metrics": row[9] if row[9] else {},
+                    "llm_analysis": row[10],
+                    "suggested_actions": row[11] if row[11] else [],
+                    "acknowledged_by": row[12],
+                    "acknowledged_at": row[13].isoformat() if row[13] else None,
+                    "resolved_by": row[14],
+                    "resolved_at": row[15].isoformat() if row[15] else None,
+                }
+                for row in rows
+            ]
+
+    async def get_anomalies_count(
+        self,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        service: Optional[str] = None
+    ) -> int:
+        """Get total count of anomalies matching filters"""
+
+        # Build WHERE clause
+        where_clauses = []
+        params = {}
+
+        if severity:
+            where_clauses.append("severity = :severity")
+            params["severity"] = severity
+
+        if status:
+            where_clauses.append("status = :status")
+            params["status"] = status
+
+        if service:
+            where_clauses.append("service = :service")
+            params["service"] = service
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        query = f"""
+            SELECT COUNT(*) as count
+            FROM anomaly_alerts
+            {where_sql}
+        """
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(text(query), params)
+            row = result.fetchone()
+            return row[0] if row else 0
+
+    async def get_anomaly_by_id(self, alert_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific anomaly by ID"""
+
+        import json
+
+        query = """
+            SELECT
+                alert_id,
+                anomaly_type,
+                detected_at,
+                service,
+                environment,
+                severity,
+                description,
+                confidence_score,
+                status,
+                metrics,
+                llm_analysis,
+                suggested_actions,
+                acknowledged_by,
+                acknowledged_at,
+                resolved_by,
+                resolved_at
+            FROM anomaly_alerts
+            WHERE alert_id = :alert_id
+        """
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(text(query), {"alert_id": alert_id})
+            row = result.fetchone()
+
+            if not row:
+                return None
+
+            return {
+                "alert_id": str(row[0]),
+                "anomaly_type": row[1],
+                "detected_at": row[2].isoformat() if row[2] else None,
+                "service": row[3],
+                "environment": row[4],
+                "severity": row[5],
+                "description": row[6],
+                "confidence_score": float(row[7]) if row[7] else 0.0,
+                "status": row[8],
+                "metrics": row[9] if row[9] else {},
+                "llm_analysis": row[10],
+                "suggested_actions": row[11] if row[11] else [],
+                "acknowledged_by": row[12],
+                "acknowledged_at": row[13].isoformat() if row[13] else None,
+                "resolved_by": row[14],
+                "resolved_at": row[15].isoformat() if row[15] else None,
+            }
+
+    async def acknowledge_anomaly(
+        self,
+        alert_id: str,
+        acknowledged_by: str = "system"
+    ) -> Dict[str, Any]:
+        """Acknowledge an anomaly alert"""
+
+        query = """
+            UPDATE anomaly_alerts
+            SET
+                status = 'acknowledged',
+                acknowledged_by = :acknowledged_by,
+                acknowledged_at = NOW(),
+                updated_at = NOW()
+            WHERE alert_id = :alert_id
+            RETURNING
+                alert_id,
+                anomaly_type,
+                detected_at,
+                service,
+                environment,
+                severity,
+                description,
+                confidence_score,
+                status,
+                metrics,
+                llm_analysis,
+                suggested_actions,
+                acknowledged_by,
+                acknowledged_at,
+                resolved_by,
+                resolved_at
+        """
+
+        async with self.postgres_engine.begin() as conn:
+            result = await conn.execute(
+                text(query),
+                {"alert_id": alert_id, "acknowledged_by": acknowledged_by}
+            )
+            row = result.fetchone()
+
+            return {
+                "alert_id": str(row[0]),
+                "anomaly_type": row[1],
+                "detected_at": row[2].isoformat() if row[2] else None,
+                "service": row[3],
+                "environment": row[4],
+                "severity": row[5],
+                "description": row[6],
+                "confidence_score": float(row[7]) if row[7] else 0.0,
+                "status": row[8],
+                "metrics": row[9] if row[9] else {},
+                "llm_analysis": row[10],
+                "suggested_actions": row[11] if row[11] else [],
+                "acknowledged_by": row[12],
+                "acknowledged_at": row[13].isoformat() if row[13] else None,
+                "resolved_by": row[14],
+                "resolved_at": row[15].isoformat() if row[15] else None,
+            }
+
+    async def resolve_anomaly(
+        self,
+        alert_id: str,
+        resolved_by: str = "system",
+        resolution_notes: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Resolve an anomaly alert"""
+
+        query = """
+            UPDATE anomaly_alerts
+            SET
+                status = 'resolved',
+                resolved_by = :resolved_by,
+                resolved_at = NOW(),
+                resolution_notes = :resolution_notes,
+                updated_at = NOW()
+            WHERE alert_id = :alert_id
+            RETURNING
+                alert_id,
+                anomaly_type,
+                detected_at,
+                service,
+                environment,
+                severity,
+                description,
+                confidence_score,
+                status,
+                metrics,
+                llm_analysis,
+                suggested_actions,
+                acknowledged_by,
+                acknowledged_at,
+                resolved_by,
+                resolved_at
+        """
+
+        async with self.postgres_engine.begin() as conn:
+            result = await conn.execute(
+                text(query),
+                {
+                    "alert_id": alert_id,
+                    "resolved_by": resolved_by,
+                    "resolution_notes": resolution_notes
+                }
+            )
+            row = result.fetchone()
+
+            return {
+                "alert_id": str(row[0]),
+                "anomaly_type": row[1],
+                "detected_at": row[2].isoformat() if row[2] else None,
+                "service": row[3],
+                "environment": row[4],
+                "severity": row[5],
+                "description": row[6],
+                "confidence_score": float(row[7]) if row[7] else 0.0,
+                "status": row[8],
+                "metrics": row[9] if row[9] else {},
+                "llm_analysis": row[10],
+                "suggested_actions": row[11] if row[11] else [],
+                "acknowledged_by": row[12],
+                "acknowledged_at": row[13].isoformat() if row[13] else None,
+                "resolved_by": row[14],
+                "resolved_at": row[15].isoformat() if row[15] else None,
+            }
+
+    async def get_anomaly_stats(self) -> Dict[str, Any]:
+        """Get anomaly statistics"""
+
+        query = """
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE severity = 'critical') as critical_count,
+                COUNT(*) FILTER (WHERE severity = 'high') as high_count,
+                COUNT(*) FILTER (WHERE severity = 'medium') as medium_count,
+                COUNT(*) FILTER (WHERE severity = 'low') as low_count,
+                COUNT(*) FILTER (WHERE status = 'new') as new_count,
+                COUNT(*) FILTER (WHERE status = 'acknowledged') as acknowledged_count,
+                COUNT(*) FILTER (WHERE status = 'resolved') as resolved_count,
+                AVG(confidence_score) as avg_confidence
+            FROM anomaly_alerts
+        """
+
+        async with self.postgres_engine.connect() as conn:
+            result = await conn.execute(text(query))
+            row = result.fetchone()
+
+            return {
+                "total": row[0] if row else 0,
+                "by_severity": {
+                    "critical": row[1] if row else 0,
+                    "high": row[2] if row else 0,
+                    "medium": row[3] if row else 0,
+                    "low": row[4] if row else 0,
+                },
+                "by_status": {
+                    "new": row[5] if row else 0,
+                    "acknowledged": row[6] if row else 0,
+                    "resolved": row[7] if row else 0,
+                },
+                "avg_confidence": float(row[8]) if row and row[8] else 0.0,
+            }

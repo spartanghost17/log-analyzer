@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
-from routers import logs, search, patterns, reports, metrics, websocket, config
+from routers import logs, search, patterns, reports, metrics, websocket, config, anomalies
 from services.cache import CacheService
 from services.database import DatabaseService
 from services.qdrant_service import QdrantService
@@ -76,7 +76,6 @@ cache_service: Optional[CacheService] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown"""
-    global db_service, qdrant_service, cache_service
 
     logger.info("api_starting")
 
@@ -145,6 +144,7 @@ app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(websocket.router, prefix="/api/ws", tags=["websocket"])
 app.include_router(config.router, prefix="/api/config", tags=["config"])
+app.include_router(anomalies.router, prefix="/api/anomalies", tags=["anomalies"])
 
 # Import summary router
 from routers import summary
@@ -167,6 +167,7 @@ async def root():
             "search": "/api/search",
             "patterns": "/api/patterns",
             "reports": "/api/reports",
+            "anomalies": "/api/anomalies",
             "metrics": "/api/metrics",
             "summary": "/api/summary",
             "config": "/api/config",

@@ -27,6 +27,13 @@ class SystemMetrics(BaseModel):
     avg_logs_per_hour: float
 
 
+class ThroughputDataPoint(BaseModel):
+    """Single throughput data point for time-series chart"""
+    time: str
+    value: int
+    errors: int = 0
+
+
 # ============================================================================
 # Dependency Injection
 # ============================================================================
@@ -129,3 +136,56 @@ async def get_metrics_overview(
     await cache.set(cache_key, response, ttl=60)
 
     return response
+
+
+@router.get("/throughput", response_model=list[ThroughputDataPoint])
+async def get_throughput_data(
+        hours: int = 24,
+        db: DatabaseService = Depends(get_db),
+        cache: CacheService = Depends(get_cache)
+):
+    """
+    Get throughput time-series data for visualization.
+
+    Returns hourly log ingestion counts and error counts for the specified time period.
+    Used by the frontend dashboard chart to show ingestion trends.
+
+    Args:
+        hours: Number of hours of historical data to return (default: 24)
+
+    Returns:
+        List of ThroughputDataPoint with time, total logs, and error count per hour
+    """
+
+    # Try cache
+    cache_key = f"metrics:throughput:{hours}"
+    cached = await cache.get(cache_key)
+    if cached:
+        return cached
+
+    # Get hourly stats from database
+    hourly_stats = db.get_hourly_stats(hours=hours)
+
+    # Transform to throughput data points
+    throughput_data = []
+    for stat in hourly_stats:
+        # Format hour as HH:00 (e.g., "14:00")
+        hour_str = stat.get("hour", "00:00")
+        if isinstance(hour_str, str):
+            time_label = hour_str
+        else:
+            # If it's a datetime object, format it
+            time_label = hour_str.strftime("%H:%M") if hasattr(hour_str, 'strftime') else str(hour_str)
+
+        throughput_data.append(
+            ThroughputDataPoint(
+                time=time_label,
+                value=stat.get("total_logs", 0),
+                errors=stat.get("error_count", 0)
+            )
+        )
+
+    # Cache for 2 minutes (balance between freshness and performance)
+    await cache.set(cache_key, [dp.model_dump() for dp in throughput_data], ttl=120)
+
+    return throughput_data
