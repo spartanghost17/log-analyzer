@@ -80,7 +80,16 @@ export const SemanticSearch = () => {
     }
   };
 
-  const results = searchMutation.data?.results || [];
+  // Get all results from API
+  const allResults = searchMutation.data?.results || [];
+
+  // Filter results client-side based on selected level
+  const results = allResults.filter((result) => {
+    // If no level filter or "All Levels" selected, show all
+    if (!filters.level || filters.level === "") return true;
+    // Otherwise, filter by matching level
+    return result.level === filters.level;
+  });
 
   // Auto-select first result when results change
   React.useEffect(() => {
