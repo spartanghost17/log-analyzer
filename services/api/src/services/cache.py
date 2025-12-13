@@ -7,10 +7,30 @@ import json
 from typing import Optional, Any
 
 import redis.asyncio as redis
+from pydantic_settings import BaseSettings
+from pydantic import Field
 
 from ..settings import get_logger
 
 logger = get_logger(__name__)
+
+class Settings(BaseSettings):
+    """Service configuration"""
+
+    # Redis cache settings
+    redis_host: str = Field(default="localhost", validation_alias="REDIS_HOST")
+    redis_port: int = Field(default=6379, validation_alias="REDIS_PORT")
+    redis_db: int = Field(default=0, validation_alias="REDIS_DB")
+    cache_ttl: int = Field(default=300, validation_alias="CACHE_TTL")  # 24 hours
+    #cache_enabled: bool = Field(default=True, validation_alias="CACHE_ENABLED")
+
+    class Config:
+        env_prefix = ""
+        case_sensitive = False
+
+
+settings = Settings()
+
 
 
 class CacheService:
@@ -18,10 +38,10 @@ class CacheService:
 
     def __init__(self):
         self.logger = logger.bind(component="cache_service")
-        self.redis_host = "redis"
-        self.redis_port = 6379
+        self.redis_host = settings.redis_host #"redis"
+        self.redis_port = settings.redis_port #6379
         self.client: Optional[redis.Redis] = None
-        self.default_ttl = 300  # 5 minutes
+        self.default_ttl = settings.cache_ttl # 300sec = 5 minutes
 
     async def connect(self):
         """Initialize Redis connection"""

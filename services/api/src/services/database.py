@@ -11,11 +11,35 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 import asyncpg
+from pydantic_settings import BaseSettings
+from pydantic import Field
 
 from ..settings import get_logger
 
 logger = get_logger(__name__)
 
+class Settings(BaseSettings):
+    """Service configuration"""
+    
+    # ClickHouse settings
+    clickhouse_host: str = Field(default="localhost", validation_alias="CLICKHOUSE_HOST")
+    clickhouse_port: int = Field(default=9000, validation_alias="CLICKHOUSE_PORT")
+    clickhouse_user: str = Field(default="admin", validation_alias="CLICKHOUSE_USER")
+    clickhouse_password: str = Field(default="clickhouse_password", validation_alias="CLICKHOUSE_PASSWORD")
+    clickhouse_database: str = Field(default="logs_db", validation_alias="CLICKHOUSE_DATABASE")
+
+    # PostgreSQL settings
+    postgres_host: str = Field(default="localhost", validation_alias="POSTGRES_HOST")
+    postgres_port: int = Field(default=5432, validation_alias="POSTGRES_PORT")
+    postgres_user: str = Field(default="admin", validation_alias="POSTGRES_USER")
+    postgres_password: str = Field(default="postgres_password", validation_alias="POSTGRES_PASSWORD")
+    postgres_db: str = Field(default="log_analysis", validation_alias="POSTGRES_DB")
+    
+    class Config:
+        env_prefix = ""
+        case_sensitive = False
+
+settings = Settings()
 
 class DatabaseService:
     """Service for database operations"""
@@ -35,11 +59,11 @@ class DatabaseService:
         self.logger.info("connecting_to_databases")
 
         # ClickHouse (synchronous engine)
-        clickhouse_url = "clickhouse+native://admin:clickhouse_password@clickhouse:9000/logs_db"
+        clickhouse_url = f"clickhouse+native://{settings.clickhouse_user}:{settings.clickhouse_password}@{settings.clickhouse_host}:{settings.clickhouse_port}/{settings.clickhouse_database}"
         self.clickhouse_engine = create_engine(clickhouse_url, pool_pre_ping=True)
 
         # PostgreSQL (async engine)
-        postgres_url = "postgresql+asyncpg://admin:postgres_password@postgres:5432/log_analysis"
+        postgres_url = f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
         self.postgres_engine = create_async_engine(postgres_url, echo=False)
         self.postgres_session_maker = sessionmaker(
             self.postgres_engine,

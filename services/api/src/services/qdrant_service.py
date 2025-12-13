@@ -8,20 +8,39 @@ from typing import List, Dict, Any, Optional
 
 import httpx
 
+from pydantic_settings import BaseSettings
+from pydantic import Field
+
 from ..settings import get_logger
 
 logger = get_logger(__name__)
 
+class Settings(BaseSettings):
+    """Service configuration"""
+
+    # Qdrant settings
+    qdrant_host: str = Field(default="qdrant", validation_alias="QDRANT_HOST")
+    qdrant_port: int = Field(default=6333, validation_alias="QDRANT_PORT")
+
+    # Jina embeddings settings
+    jina_service_url: str = Field(default="http://jina-embeddings:8003", validation_alias="JINA_SERVICE_URL")
+    jina_timeout: int = Field(default=30, validation_alias="JINA_TIMEOUT")
+
+    class Config:
+        env_prefix = ""
+        case_sensitive = False
+
+settings = Settings()
 
 class QdrantService:
     """Service for Qdrant vector search operations"""
 
     def __init__(self):
         self.logger = logger.bind(component="qdrant_service")
-        self.qdrant_host = "qdrant"
-        self.qdrant_port = 6333
+        self.qdrant_host = settings.qdrant_host #"qdrant"
+        self.qdrant_port = settings.qdrant_port #6333
         self.qdrant_url = f"http://{self.qdrant_host}:{self.qdrant_port}"
-        self.jina_service_url = "http://jina-embeddings:8003"
+        self.jina_service_url = settings.jina_service_url #"http://jina-embeddings:8003"
         self.http_client: Optional[httpx.AsyncClient] = None
 
     async def connect(self):

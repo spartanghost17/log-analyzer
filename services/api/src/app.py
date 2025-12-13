@@ -24,24 +24,32 @@ from routers import logs, search, patterns, reports, metrics, websocket, config,
 from services.cache import CacheService
 from services.database import DatabaseService
 from services.qdrant_service import QdrantService
+from pydantic_settings import BaseSettings
+from pydantic import Field
+
 from settings import setup_development_logging, get_logger
 
-setup_development_logging()
-logger = get_logger(__name__)
-# ============================================================================
-# Logging
-# ============================================================================
-#
-# structlog.configure(
-#     processors=[
-#         structlog.processors.TimeStamper(fmt="iso"),
-#         structlog.processors.add_log_level,
-#         structlog.processors.JSONRenderer()
-#     ]
-# )
-#
-# logger = structlog.get_logger()
 
+setup_development_logging()
+
+
+class Settings(BaseSettings):
+    """Service configuration"""
+
+    # Service settings
+    service_name: str = Field(default="api-gateway", validation_alias="SERVICE_NAME")
+    host: str = Field(default="0.0.0.0", validation_alias="HOST")
+    port: int = Field(default=8003, validation_alias="PORT")
+
+    log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+
+    class Config:
+        env_prefix = ""
+        case_sensitive = False
+
+settings = Settings()
+
+logger = get_logger(__name__).bind(component=settings.service_name)
 
 # ============================================================================
 # Metrics
@@ -255,8 +263,8 @@ if __name__ == "__main__":
 
     uvicorn.run(
         app,
-        host="0.0.0.0",
-        port=8005,
+        host=settings.host,#"0.0.0.0",
+        port=settings.port,#8005,
         reload=True,
-        log_level="info"
+        log_level=settings.log_level.lower(),#"info"
     )

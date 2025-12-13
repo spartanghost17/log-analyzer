@@ -64,50 +64,50 @@ class Settings(BaseSettings):
     """Service configuration"""
 
     # Service settings
-    service_name: str = Field(default="vectorization-worker")
-    host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8004)
+    service_name: str = Field(default="vectorization-worker", validation_alias="SERVICE_NAME")
+    host: str = Field(default="0.0.0.0", validation_alias="HOST")
+    port: int = Field(default=8004, validation_alias="PORT")
 
     # Kafka settings
-    kafka_bootstrap_servers: str = Field(default="localhost:9092")
-    kafka_topic: str = Field(default="vectorization-queue")
-    kafka_group_id: str = Field(default="vectorization-worker-group")
-    kafka_auto_offset_reset: str = Field(default="earliest")
+    kafka_bootstrap_servers: str = Field(default="localhost:9092", validation_alias="KAFKA_BOOTSTRAP_SERVERS")
+    kafka_topic: str = Field(default="vectorization-queue", validation_alias="KAFKA_TOPIC")
+    kafka_group_id: str = Field(default="vectorization-worker-group", validation_alias="KAFKA_GROUP_ID")
+    kafka_auto_offset_reset: str = Field(default="earliest", validation_alias="KAFKA_AUTO_OFFSET_RESET")
 
     # Dead Letter Queue settings
-    dlq_topic: str = Field(default="vectorization-queue-dlq")
-    dlq_enabled: bool = Field(default=True)
-    max_retries_per_batch: int = Field(default=3)
+    dlq_topic: str = Field(default="vectorization-queue-dlq", validation_alias="DLQ_TOPIC")
+    dlq_enabled: bool = Field(default=True, validation_alias="DLQ_ENABLED")
+    max_retries_per_batch: int = Field(default=3, validation_alias="MAX_RETRIES_PER_BATCH")
 
     # Jina Embeddings Service
-    jina_service_url: str = Field(default="http://jina-embeddings:8003")
-    jina_timeout: int = Field(default=30)
+    jina_service_url: str = Field(default="http://jina-embeddings:8003", validation_alias="JINA_SERVICE_URL")
+    jina_timeout: int = Field(default=30, validation_alias="JINA_TIMEOUT")
 
     # Qdrant settings
-    qdrant_host: str = Field(default="localhost")
-    qdrant_port: int = Field(default=6333)
-    qdrant_collection: str = Field(default="log_embeddings")
+    qdrant_host: str = Field(default="localhost", validation_alias="QDRANT_HOST")
+    qdrant_port: int = Field(default=6333, validation_alias="QDRANT_PORT")
+    qdrant_collection: str = Field(default="log_embeddings", validation_alias="QDRANT_COLLECTION")
 
     # ClickHouse settings
-    clickhouse_host: str = Field(default="localhost")
-    clickhouse_port: int = Field(default=9000)
-    clickhouse_database: str = Field(default="logs_db")
-    clickhouse_user: str = Field(default="default")
-    clickhouse_password: str = Field(default="")
+    clickhouse_host: str = Field(default="localhost", validation_alias="CLICKHOUSE_HOST")
+    clickhouse_port: int = Field(default=9000, validation_alias="CLICKHOUSE_PORT")
+    clickhouse_database: str = Field(default="logs_db", validation_alias="CLICKHOUSE_DATABASE")
+    clickhouse_user: str = Field(default="default", validation_alias="CLICKHOUSE_USER")
+    clickhouse_password: str = Field(default="", validation_alias="CLICKHOUSE_PASSWORD")
 
     # Processing settings
-    batch_size: int = Field(default=10)
-    batch_timeout_seconds: float = Field(default=5.0)
-    max_retries: int = Field(default=3)
+    batch_size: int = Field(default=10, validation_alias="BATCH_SIZE")
+    batch_timeout_seconds: float = Field(default=5.0, validation_alias="BATCH_TIMEOUT_SECONDS")
+    max_retries: int = Field(default=3, validation_alias="MAX_RETRIES")
 
     # Circuit breaker settings
-    circuit_breaker_fail_max: int = Field(default=5)
-    circuit_breaker_timeout: int = Field(default=60)
+    circuit_breaker_fail_max: int = Field(default=5, validation_alias="CIRCUIT_BREAKER_FAIL_MAX")
+    circuit_breaker_timeout: int = Field(default=60, validation_alias="CIRCUIT_BREAKER_TIMEOUT")
 
     # Retry settings
-    retry_attempts: int = Field(default=3)
-    retry_min_wait: int = Field(default=1)
-    retry_max_wait: int = Field(default=10)
+    retry_attempts: int = Field(default=3, validation_alias="RETRY_ATTEMPTS")
+    retry_min_wait: int = Field(default=1, validation_alias="RETRY_MIN_WAIT")
+    retry_max_wait: int = Field(default=10, validation_alias="RETRY_MAX_WAIT")
 
     class Config:
         env_prefix = ""
