@@ -22,15 +22,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install curl for health checks
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install deps
+# Copy requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy ALL source code
-# COPY services/llm-analyzer/src ./src
+# Copy application code
 COPY /src ./src
 
 # Tell Python where code lives
@@ -38,4 +39,5 @@ ENV PYTHONPATH=/app/src
 
 EXPOSE 8002
 
+# Run the application
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8002"]

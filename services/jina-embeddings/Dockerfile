@@ -1,5 +1,4 @@
 FROM python:3.11-slim
-# LABEL authors="adamb"
 
 WORKDIR /app
 
@@ -8,18 +7,17 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Copy requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create model cache directory
-RUN mkdir -p /models
+# Copy application code
+COPY /src ./src
 
-# Copy application
-COPY app.py .
+# Tell Python where code lives
+ENV PYTHONPATH=/app/src
 
-# Expose API port
 EXPOSE 8003
 
-# Run the FastAPI application
+# Run the application
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8003"]
