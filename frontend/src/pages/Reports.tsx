@@ -98,12 +98,12 @@ export const Reports = () => {
                 {latestReport.recommendations.map((rec, index) => (
                   <div
                     key={index}
-                    className="flex items-start gap-2 p-3 rounded-lg bg-black/20 border border-border-dark"
+                    className="flex items-center gap-3 p-3 rounded-lg bg-black/20 border border-border-dark"
                   >
-                    <div className="mt-0.5 rounded-full bg-primary/20 p-1">
-                      <span className="material-symbols-outlined text-primary text-sm">arrow_forward</span>
+                    <div className="flex-shrink-0 flex items-center justify-center rounded-full bg-primary/20 p-1.5">
+                      <span className="material-symbols-outlined text-primary text-[16px]">arrow_forward</span>
                     </div>
-                    <p className="text-sm text-gray-200">{rec}</p>
+                    <p className="text-sm text-gray-200 leading-relaxed">{rec}</p>
                   </div>
                 ))}
               </div>
