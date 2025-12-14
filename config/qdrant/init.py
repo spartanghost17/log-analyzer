@@ -18,7 +18,7 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = os.getenv("QDRANT_PORT", "6333")
 QDRANT_URL = f"http://{QDRANT_HOST}:{QDRANT_PORT}"
 
-# Jina embeddings dimension (jina-embeddings-v2-base-en)
+# Jina embeddings dimension (jina-embeddings-v3)
 EMBEDDING_DIMENSION = 768
 
 # Retry configuration
@@ -117,6 +117,20 @@ def initialize_qdrant():
     # =========================================================================
     # Collection 1: log_embeddings
     # Primary collection for storing log message embeddings
+    #
+    # Payload Structure (synced with vectorization-worker):
+    # - log_id: Unique log identifier (from ClickHouse)
+    # - timestamp: Unix timestamp (integer) for temporal filtering
+    # - service: Service name (e.g., "api-gateway", "payment-service")
+    # - environment: Deployment environment (e.g., "production", "staging")
+    # - level: Log level (e.g., "ERROR", "WARN", "INFO")
+    # - message: Log message text (truncated to 500 chars)
+    # - stack_trace: Stack trace for errors (truncated to 1KB, nullable)
+    # - trace_id: Distributed trace ID for correlation
+    # - user_id: User identifier for user-specific queries
+    # - request_id: Request identifier for request-level tracing
+    #
+    # Note: Embeddings are 768-dimensional (Jina v3 with Matryoshka truncation)
     # =========================================================================
 
     log_embeddings_config = {
@@ -136,10 +150,21 @@ def initialize_qdrant():
     else:
         if create_collection("log_embeddings", log_embeddings_config):
             # Create indexes for fast filtering
+            # Core identification fields
+            create_payload_index("log_embeddings", "log_id", "keyword")
             create_payload_index("log_embeddings", "service", "keyword")
-            create_payload_index("log_embeddings", "level", "keyword")
             create_payload_index("log_embeddings", "environment", "keyword")
+            create_payload_index("log_embeddings", "level", "keyword")
+            
+            # Temporal filtering
             create_payload_index("log_embeddings", "timestamp", "integer")
+            
+            # Distributed tracing support
+            create_payload_index("log_embeddings", "trace_id", "keyword")
+            create_payload_index("log_embeddings", "request_id", "keyword")
+            
+            # User context
+            create_payload_index("log_embeddings", "user_id", "keyword")
 
     # =========================================================================
     # Collection 2: error_patterns

@@ -17,6 +17,7 @@ Features:
 import asyncio
 import hashlib
 import json
+import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -44,10 +45,18 @@ from tenacity import (
     before_sleep_log
 )
 
-from settings import setup_development_logging, get_logger
+from settings import setup_production_logging, setup_development_logging, get_logger
 
-setup_development_logging()
+#setup_development_logging()
+setup_production_logging()
 logger = get_logger(__name__)
+
+def _log_retry_attempt(retry_state):
+    """Log retry attempts with proper context"""
+    logger.warning("api_retry_attempt", 
+        attempt=retry_state.attempt_number,
+        wait_seconds=retry_state.next_action.sleep if retry_state.next_action else 0,
+        request_id=request_id_var.get())
 
 # ============================================================================
 # Request ID Context Variable
@@ -268,12 +277,12 @@ class VectorizationWorker:
         # Circuit breakers
         self.qdrant_breaker = CircuitBreaker(
             fail_max=settings.circuit_breaker_fail_max,
-            timeout_duration=settings.circuit_breaker_timeout,
+            #timeout_duration=settings.circuit_breaker_timeout, #TODO: remove these are incorrect
             name="Qdrant"
         )
         self.clickhouse_breaker = CircuitBreaker(
             fail_max=settings.circuit_breaker_fail_max,
-            timeout_duration=settings.circuit_breaker_timeout,
+            # timeout_duration=settings.circuit_breaker_timeout,
             name="ClickHouse"
         )
 
@@ -476,7 +485,7 @@ class VectorizationWorker:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
         retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException)),
-        before_sleep=before_sleep_log(logger, structlog.INFO),
+        before_sleep=_log_retry_attempt,#before_sleep_log(logger, logging.INFO),
         reraise=True
     )
     async def _call_jina_service(self, texts: List[str]) -> List[List[float]]:
@@ -539,7 +548,7 @@ class VectorizationWorker:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
         retry=retry_if_exception_type(Exception),
-        before_sleep=before_sleep_log(logger, structlog.INFO),
+        before_sleep=_log_retry_attempt,#before_sleep_log(logger, logging.INFO),
         reraise=True
     )
     def _store_in_qdrant_with_retry(self, points: List[PointStruct]) -> None:
@@ -580,18 +589,29 @@ class VectorizationWorker:
                 ).hexdigest()
 
                 # Prepare payload (metadata)
+                # Store rich metadata for semantic search filtering and context
                 payload = {
+                    # Core identification
                     "log_id": log.log_id,
                     "timestamp": int(datetime.fromisoformat(
                         log.timestamp.replace('Z', '+00:00')
                     ).timestamp()),
+                    
+                    # Service context
                     "service": log.service,
                     "environment": log.environment,
                     "level": log.level,
+                    
+                    # Message content
                     "message": log.message[:500],  # Truncate for storage
+                    "stack_trace": log.stack_trace[:1000] if log.stack_trace else None,  # Store first 1KB
+                    
+                    # Distributed tracing
                     "trace_id": log.trace_id,
-                    "user_id": log.user_id,
-                    "request_id": log.request_id
+                    "request_id": log.request_id,
+                    
+                    # User context
+                    "user_id": log.user_id
                 }
 
                 # Create point
@@ -623,7 +643,7 @@ class VectorizationWorker:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
         retry=retry_if_exception_type(Exception),
-        before_sleep=before_sleep_log(logger, structlog.INFO),
+        before_sleep=_log_retry_attempt,#before_sleep_log(logger, logging.INFO),
         reraise=True
     )
     def _update_clickhouse_with_retry(self, log_ids: List[str]) -> None:
