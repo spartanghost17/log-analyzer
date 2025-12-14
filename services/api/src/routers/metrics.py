@@ -6,9 +6,9 @@ Endpoints for system-wide metrics and statistics
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from ..services.database import DatabaseService
-from ..services.cache import CacheService
-from ..services.qdrant_service import QdrantService
+from services.database import DatabaseService
+from services.cache import CacheService
+from services.qdrant_service import QdrantService
 
 router = APIRouter()
 

@@ -9,8 +9,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from ..services.database import DatabaseService
-from ..services.cache import CacheService
+from services.database import DatabaseService
+from services.cache import CacheService
 # from src.services.database import DatabaseService
 # from src.services.cache import CacheService
 

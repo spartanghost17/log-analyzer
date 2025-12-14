@@ -14,13 +14,13 @@ import asyncpg
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
-from ..settings import get_logger
+from settings import get_logger
 
 logger = get_logger(__name__)
 
 class Settings(BaseSettings):
     """Service configuration"""
-    
+
     # ClickHouse settings
     clickhouse_host: str = Field(default="localhost", validation_alias="CLICKHOUSE_HOST")
     clickhouse_port: int = Field(default=9000, validation_alias="CLICKHOUSE_PORT")

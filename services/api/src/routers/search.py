@@ -8,8 +8,8 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 
-from ..services.qdrant_service import QdrantService
-from ..services.cache import CacheService
+from services.qdrant_service import QdrantService
+from services.cache import CacheService
 
 router = APIRouter()
 

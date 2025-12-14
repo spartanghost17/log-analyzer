@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 import structlog
 
-from ..services.database import DatabaseService
+from services.database import DatabaseService
 
 router = APIRouter()
 logger = structlog.get_logger()

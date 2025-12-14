@@ -10,7 +10,7 @@ import redis.asyncio as redis
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
-from ..settings import get_logger
+from settings import get_logger
 
 logger = get_logger(__name__)
 

@@ -9,9 +9,9 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from ..services.database import DatabaseService
-from ..services.qdrant_service import QdrantService
-from ..services.cache import CacheService
+from services.database import DatabaseService
+from services.qdrant_service import QdrantService
+from services.cache import CacheService
 
 
 router = APIRouter()

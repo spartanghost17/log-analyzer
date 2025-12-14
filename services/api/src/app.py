@@ -97,12 +97,12 @@ async def lifespan(app: FastAPI):
     cache_service = CacheService()
     await cache_service.connect()
 
-    logger.info("api_started")
+    logger.info("api-gateway started")
 
     yield
 
     # Cleanup
-    logger.info("api_stopping")
+    logger.info("api-gateway stopping")
 
     if db_service:
         await db_service.disconnect()
