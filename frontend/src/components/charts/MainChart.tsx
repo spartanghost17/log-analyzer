@@ -18,82 +18,114 @@ interface MainChartProps {
 export const MainChart = ({ data, loading }: MainChartProps) => {
   if (loading) {
     return (
-      <div className="relative h-[300px] w-full flex items-center justify-center rounded-xl border border-border-dark bg-panel-light">
-        <div className="flex items-center gap-2 text-sm text-text-muted animate-pulse">
-          <span className="material-symbols-outlined animate-spin">
-            refresh
-          </span>
-          Loading Data...
+      <div className="relative h-[400px] w-full flex items-center justify-center rounded-xl border border-primary-alt/20 bg-gradient-to-br from-primary-alt/5 to-transparent bg-panel-light">
+        <div className="flex flex-col items-center gap-3">
+          <div className="relative">
+            <span className="material-symbols-outlined animate-spin text-primary-alt text-[40px]">
+              refresh
+            </span>
+            <div className="absolute inset-0 rounded-full bg-primary-alt/20 blur-xl animate-pulse"></div>
+          </div>
+          <span className="text-sm font-medium text-text-muted">Loading Chart Data...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-border-dark bg-panel-light p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-bold text-white">Ingestion Throughput</h3>
-          <p className="text-xs text-text-muted">
-            Logs per second over last 24h
-          </p>
+    <div className="rounded-xl border border-primary-alt/20 bg-gradient-to-br from-primary-alt/5 to-transparent bg-panel-light p-6 relative overflow-hidden group hover:border-primary-alt/30 transition-all duration-300 hover:shadow-lg hover:shadow-primary-alt/10">
+      {/* Decorative background elements */}
+      <div className="absolute top-0 right-0 w-64 h-64 bg-primary-alt/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+      <div className="absolute bottom-0 left-0 w-48 h-48 bg-primary/5 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none"></div>
+      
+      <div className="mb-6 flex items-center justify-between relative z-10">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-alt/10 text-primary-alt">
+            <span className="material-symbols-outlined text-[20px]">
+              monitoring
+            </span>
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              Ingestion Throughput
+            </h3>
+            <p className="text-xs text-text-muted font-medium">
+              Logs per second over last 24h
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1 text-xs font-bold text-primary">
-            <span className="h-2 w-2 rounded-full bg-primary animate-pulse"></span>{" "}
-            Live
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary-alt/10 border border-primary-alt/20">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary-alt animate-pulse shadow-[0_0_6px_rgba(14,165,233,0.8)]"></span>
+            <span className="text-xs font-bold text-primary-alt uppercase tracking-wide">Live</span>
+          </div>
         </div>
       </div>
 
-      <div className="h-[300px] w-full">
+      <div className="h-[300px] w-full relative z-10">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data}>
             <defs>
               <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#facc15" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#facc15" stopOpacity={0} />
+                <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} />
+                <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
               </linearGradient>
             </defs>
             <CartesianGrid
               strokeDasharray="3 3"
               stroke="#233c48"
               vertical={false}
+              opacity={0.5}
             />
             <XAxis
               dataKey="time"
               stroke="#92b7c9"
-              fontSize={12}
+              fontSize={11}
               tickLine={false}
               axisLine={false}
               minTickGap={30}
+              fontWeight={500}
             />
             <YAxis
               stroke="#92b7c9"
-              fontSize={12}
+              fontSize={11}
               tickLine={false}
               axisLine={false}
               tickFormatter={(value) => `${value / 1000}k`}
+              fontWeight={500}
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: "#16232b",
-                borderColor: "#233c48",
+                backgroundColor: "#0f1419",
+                borderColor: "#0ea5e9",
+                borderWidth: 1,
                 color: "#fff",
+                borderRadius: "0.75rem",
+                padding: "0.75rem",
+                boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
               }}
-              itemStyle={{ color: "#facc15" }}
-              labelStyle={{ color: "#92b7c9", marginBottom: "0.5rem" }}
+              itemStyle={{ 
+                color: "#0ea5e9",
+                fontWeight: 600,
+                fontSize: "0.875rem",
+              }}
+              labelStyle={{ 
+                color: "#92b7c9", 
+                marginBottom: "0.5rem",
+                fontWeight: 600,
+                fontSize: "0.75rem",
+              }}
               cursor={{
-                stroke: "#facc15",
-                strokeWidth: 1,
-                strokeDasharray: "3 3",
+                stroke: "#0ea5e9",
+                strokeWidth: 2,
+                strokeDasharray: "5 5",
               }}
             />
             <Area
               type="monotone"
               dataKey="value"
-              stroke="#facc15"
-              strokeWidth={2}
+              stroke="#0ea5e9"
+              strokeWidth={2.5}
               fillOpacity={1}
               fill="url(#colorValue)"
             />

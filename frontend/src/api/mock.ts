@@ -493,6 +493,41 @@ export const mockApi = {
       current_batch_size: 7,
     };
   },
+
+  // Anomaly Detection Z-Score Data
+  getAnomalyZScoreData: async (): Promise<any> => {
+    await new Promise((r) => setTimeout(r, 400));
+    // Generate realistic anomaly detection data
+    const points = 50;
+    const data = Array.from({ length: points }, (_, i) => {
+      // Create a baseline with some noise
+      let value = Math.random() * 0.5 - 0.25;
+      // Add spike patterns at different points
+      if (i > 30 && i < 40) {
+        value += Math.random() * 2 + 1; // Significant spike
+      } else if (i > 15 && i < 18) {
+        value += Math.random() * 1.5 + 0.5; // Minor spike
+      }
+      return {
+        index: i,
+        z_score: value,
+        is_anomaly: Math.abs(value) > 1.0,
+        timestamp: new Date(Date.now() - (50 - i) * 30 * 60 * 1000).toISOString(), // 30 min intervals
+      };
+    });
+    
+    return {
+      data_points: data,
+      threshold: 1.0,
+      time_range: {
+        start: data[0].timestamp,
+        end: data[data.length - 1].timestamp,
+      },
+      anomaly_count: data.filter(d => d.is_anomaly).length,
+      baseline_mean: 0,
+      baseline_stddev: 0.8,
+    };
+  },
 };
 
 export default mockApi;

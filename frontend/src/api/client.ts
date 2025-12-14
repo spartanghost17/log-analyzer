@@ -309,6 +309,12 @@ export const api = {
     const { data } = await apiClient.get("http://localhost:8004/stats");
     return data;
   },
+
+  // Anomaly Detection Z-Score Data
+  getAnomalyZScoreData: async (): Promise<any> => {
+    const { data } = await apiClient.get("/api/anomalies/zscore");
+    return data;
+  },
 };
 
 // WebSocket Client for Real-time Logs

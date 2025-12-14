@@ -157,19 +157,19 @@ export const Anomalies = () => {
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-white tracking-tight text-[28px] font-bold leading-tight font-display">
+          <h1 className="text-gray-900 dark:text-white tracking-tight text-[28px] font-bold leading-tight font-display">
             Anomaly Detection & Alerts
           </h1>
-          <p className="text-text-muted text-sm font-normal mt-1">
+          <p className="text-gray-500 dark:text-gray-400 text-sm font-normal mt-1">
             Monitor system anomalies detected by AI-powered analysis and baseline comparisons.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 rounded-lg bg-panel-dark hover:bg-border-dark/50 border border-border-dark text-white px-4 py-2 transition-colors font-medium text-sm cursor-pointer">
+          <button className="flex items-center gap-2 rounded-lg bg-white dark:bg-surface-dark hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-white px-4 py-2 transition-colors font-medium text-sm cursor-pointer">
             <span className="material-symbols-outlined text-[18px]">tune</span>
             Configure Alerts
           </button>
-          <button className="flex items-center gap-2 rounded-lg bg-primary hover:bg-primary/90 text-background-dark px-4 py-2 transition-colors font-bold text-sm cursor-pointer">
+          <button className="flex items-center gap-2 rounded-lg bg-primary hover:bg-primary-hover text-black px-4 py-2 transition-colors font-bold text-sm cursor-pointer shadow-lg shadow-primary/20">
             <span className="material-symbols-outlined text-[18px]">refresh</span>
             Refresh
           </button>
@@ -178,9 +178,9 @@ export const Anomalies = () => {
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-xl border border-border-dark bg-panel-dark p-5 shadow-sm">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-surface-dark p-5 shadow-sm">
           <div className="mb-2 flex items-center justify-between">
-            <p className="text-sm font-medium text-text-muted uppercase tracking-wider">
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               Total Anomalies
             </p>
             <span className="material-symbols-outlined text-primary text-[20px]">
@@ -188,31 +188,31 @@ export const Anomalies = () => {
             </span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white font-display">
+            <span className="text-3xl font-bold text-gray-900 dark:text-white font-display">
               {anomalies.length}
             </span>
-            <span className="text-xs text-text-muted">detected</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">detected</span>
           </div>
         </div>
 
-        <div className="rounded-xl border border-red-400/30 bg-panel-dark p-5 shadow-[0_0_15px_rgba(248,113,113,0.05)]">
+        <div className="rounded-xl border border-red-400/30 bg-white dark:bg-surface-dark p-5 shadow-sm">
           <div className="mb-2 flex items-center justify-between">
-            <p className="text-sm font-medium text-red-400 uppercase tracking-wider">
+            <p className="text-sm font-medium text-red-500 dark:text-red-400 uppercase tracking-wider">
               Critical + High
             </p>
-            <span className="material-symbols-outlined text-red-400 text-[20px]">
+            <span className="material-symbols-outlined text-red-500 dark:text-red-400 text-[20px]">
               error
             </span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white font-display">
+            <span className="text-3xl font-bold text-gray-900 dark:text-white font-display">
               {criticalCount + highCount}
             </span>
-            <span className="text-xs text-red-400">require attention</span>
+            <span className="text-xs text-red-500 dark:text-red-400">require attention</span>
           </div>
         </div>
 
-        <div className="rounded-xl border border-primary/30 bg-panel-light p-5 shadow-[0_0_15px_rgba(250,204,21,0.05)]">
+        <div className="rounded-xl border border-primary/30 bg-white dark:bg-surface-dark p-5 shadow-sm">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-sm font-medium text-primary uppercase tracking-wider">
               New / Unresolved
@@ -222,46 +222,46 @@ export const Anomalies = () => {
             </span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white font-display">
+            <span className="text-3xl font-bold text-gray-900 dark:text-white font-display">
               {newCount}
             </span>
             <span className="text-xs text-primary">needs review</span>
           </div>
         </div>
 
-        <div className="rounded-xl border border-border-dark bg-panel-dark p-5 shadow-sm">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-surface-dark p-5 shadow-sm">
           <div className="mb-2 flex items-center justify-between">
-            <p className="text-sm font-medium text-text-muted uppercase tracking-wider">
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               Avg Confidence
             </p>
-            <span className="material-symbols-outlined text-green-400 text-[20px]">
+            <span className="material-symbols-outlined text-green-500 dark:text-green-400 text-[20px]">
               speed
             </span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white font-display">
+            <span className="text-3xl font-bold text-gray-900 dark:text-white font-display">
               {avgConfidence.toFixed(0)}%
             </span>
-            <span className="text-xs text-text-muted">accuracy</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">accuracy</span>
           </div>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="rounded-xl border border-border-dark bg-panel-dark p-4">
+      <div className="rounded-xl border border-gray-200 dark:border-border-dark bg-white dark:bg-surface-dark p-4">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-text-muted text-[18px]">filter_alt</span>
-            <span className="text-sm font-medium text-white">Filters:</span>
+            <span className="material-symbols-outlined text-gray-500 dark:text-gray-400 text-[18px]">filter_alt</span>
+            <span className="text-sm font-medium text-gray-900 dark:text-white">Filters:</span>
           </div>
 
           {/* Severity Filter */}
           <div className="flex items-center gap-2">
-            <label className="text-xs text-text-muted uppercase tracking-wider">Severity</label>
+            <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Severity</label>
             <select
               value={severityFilter}
               onChange={(e) => setSeverityFilter(e.target.value)}
-              className="bg-background-dark border border-border-dark rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
+              className="bg-gray-100 dark:bg-surface-darker border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
             >
               <option value="all">All</option>
               <option value="critical">Critical</option>
@@ -273,11 +273,11 @@ export const Anomalies = () => {
 
           {/* Status Filter */}
           <div className="flex items-center gap-2">
-            <label className="text-xs text-text-muted uppercase tracking-wider">Status</label>
+            <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</label>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-background-dark border border-border-dark rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
+              className="bg-gray-100 dark:bg-surface-darker border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
             >
               <option value="all">All</option>
               <option value="new">New</option>
@@ -288,11 +288,11 @@ export const Anomalies = () => {
 
           {/* Service Filter */}
           <div className="flex items-center gap-2">
-            <label className="text-xs text-text-muted uppercase tracking-wider">Service</label>
+            <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Service</label>
             <select
               value={serviceFilter}
               onChange={(e) => setServiceFilter(e.target.value)}
-              className="bg-background-dark border border-border-dark rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
+              className="bg-gray-100 dark:bg-surface-darker border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
             >
               <option value="all">All Services</option>
               {uniqueServices.map((service) => (
@@ -311,7 +311,7 @@ export const Anomalies = () => {
                 setStatusFilter('all');
                 setServiceFilter('all');
               }}
-              className="ml-auto text-xs text-primary hover:text-white font-medium transition-colors cursor-pointer"
+              className="ml-auto text-xs text-primary hover:text-primary-hover font-medium transition-colors cursor-pointer"
             >
               Clear Filters
             </button>
@@ -320,12 +320,12 @@ export const Anomalies = () => {
       </div>
 
       {/* Anomalies List */}
-      <div className="rounded-xl border border-border-dark bg-panel-dark overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border-dark px-6 py-4">
-          <h3 className="text-lg font-bold text-white">
+      <div className="rounded-xl border border-gray-200 dark:border-border-dark bg-white dark:bg-surface-dark overflow-hidden shadow-sm">
+        <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white">
             Detected Anomalies {anomalies.length > 0 && `(${anomalies.length})`}
           </h3>
-          <div className="flex items-center gap-2 text-xs text-text-muted">
+          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <span className="material-symbols-outlined text-[16px]">schedule</span>
             <span>Auto-refresh: 30s</span>
           </div>
@@ -336,13 +336,13 @@ export const Anomalies = () => {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
         ) : anomalies.length === 0 ? (
-          <div className="p-12 text-center text-text-muted">
-            <span className="material-symbols-outlined text-[64px] mb-4 text-green-400">check_circle</span>
-            <p className="text-lg font-medium text-white mb-1">No Anomalies Detected</p>
+          <div className="p-12 text-center text-gray-500 dark:text-gray-400">
+            <span className="material-symbols-outlined text-[64px] mb-4 text-green-500 dark:text-green-400">check_circle</span>
+            <p className="text-lg font-medium text-gray-900 dark:text-white mb-1">No Anomalies Detected</p>
             <p className="text-sm">Your system is running smoothly with no detected anomalies.</p>
           </div>
         ) : (
-          <div className="divide-y divide-border-dark">
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
             {anomalies.map((anomaly) => (
               <AnomalyCard
                 key={anomaly.alert_id}
@@ -391,14 +391,14 @@ const AnomalyCard: React.FC<AnomalyCardProps> = ({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="px-6 py-5 hover:bg-border-dark/30 transition-colors">
+    <div className="px-6 py-5 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
       <div className="flex items-start gap-4">
         {/* Severity Icon */}
         <div className={`size-10 rounded-lg flex items-center justify-center ${
-          anomaly.severity === 'critical' ? 'bg-red-400/10 text-red-400' :
-          anomaly.severity === 'high' ? 'bg-orange-400/10 text-orange-400' :
-          anomaly.severity === 'medium' ? 'bg-yellow-400/10 text-yellow-400' :
-          'bg-blue-400/10 text-blue-400'
+          anomaly.severity === 'critical' ? 'bg-red-500/10 dark:bg-red-400/10 text-red-500 dark:text-red-400' :
+          anomaly.severity === 'high' ? 'bg-orange-500/10 dark:bg-orange-400/10 text-orange-500 dark:text-orange-400' :
+          anomaly.severity === 'medium' ? 'bg-yellow-500/10 dark:bg-yellow-400/10 text-yellow-600 dark:text-yellow-400' :
+          'bg-blue-500/10 dark:bg-blue-400/10 text-blue-500 dark:text-blue-400'
         }`}>
           <span className="material-symbols-outlined text-[20px]">
             {getSeverityIcon(anomaly.severity)}
@@ -410,7 +410,7 @@ const AnomalyCard: React.FC<AnomalyCardProps> = ({
           <div className="flex items-start justify-between gap-4 mb-2">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <h4 className="text-white font-bold text-base truncate">
+                <h4 className="text-gray-900 dark:text-white font-bold text-base truncate">
                   {anomaly.anomaly_type.replace(/_/g, ' ').toUpperCase()}
                 </h4>
                 <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-bold uppercase ring-1 ring-inset ${getSeverityColor(anomaly.severity)}`}>
@@ -420,8 +420,8 @@ const AnomalyCard: React.FC<AnomalyCardProps> = ({
                   {anomaly.status}
                 </span>
               </div>
-              <p className="text-sm text-gray-200 mb-2">{anomaly.description}</p>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-text-muted">
+              <p className="text-sm text-gray-700 dark:text-gray-200 mb-2">{anomaly.description}</p>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
                 <span className="flex items-center gap-1">
                   <span className="material-symbols-outlined text-[14px]">dns</span>
                   {anomaly.service}
@@ -445,7 +445,7 @@ const AnomalyCard: React.FC<AnomalyCardProps> = ({
             <div className="flex items-center gap-2 flex-shrink-0">
               <button
                 onClick={() => setExpanded(!expanded)}
-                className="text-primary hover:text-white transition-colors cursor-pointer"
+                className="text-primary hover:text-primary-hover transition-colors cursor-pointer"
                 title={expanded ? 'Collapse' : 'Expand'}
               >
                 <span className="material-symbols-outlined text-[20px]">
@@ -456,7 +456,7 @@ const AnomalyCard: React.FC<AnomalyCardProps> = ({
                 <button
                   onClick={onAcknowledge}
                   disabled={isAcknowledging}
-                  className="px-3 py-1.5 rounded-lg bg-blue-400/10 hover:bg-blue-400/20 text-blue-400 text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-blue-500/10 dark:bg-blue-400/10 hover:bg-blue-500/20 dark:hover:bg-blue-400/20 text-blue-600 dark:text-blue-400 text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
                   title="Acknowledge"
                 >
                   {isAcknowledging && (
@@ -469,7 +469,7 @@ const AnomalyCard: React.FC<AnomalyCardProps> = ({
                 <button
                   onClick={onResolve}
                   disabled={isResolving}
-                  className="px-3 py-1.5 rounded-lg bg-green-400/10 hover:bg-green-400/20 text-green-400 text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-green-500/10 dark:bg-green-400/10 hover:bg-green-500/20 dark:hover:bg-green-400/20 text-green-600 dark:text-green-400 text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
                   title="Mark as Resolved"
                 >
                   {isResolving && (
@@ -491,17 +491,17 @@ const AnomalyCard: React.FC<AnomalyCardProps> = ({
 
           {/* Expanded Details */}
           {expanded && anomaly.metrics && (
-            <div className="mt-4 p-4 rounded-lg bg-black/20 border border-border-dark">
+            <div className="mt-4 p-4 rounded-lg bg-gray-100 dark:bg-black/20 border border-gray-200 dark:border-border-dark">
               <h5 className="text-xs font-bold text-primary uppercase tracking-wider mb-3">
                 Anomaly Metrics
               </h5>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {Object.entries(anomaly.metrics).map(([key, value]) => (
-                  <div key={key} className="bg-background-dark/50 rounded-lg p-3">
-                    <p className="text-xs text-text-muted mb-1">
+                  <div key={key} className="bg-white dark:bg-background-dark/50 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                       {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                     </p>
-                    <p className="text-white font-mono font-bold">
+                    <p className="text-gray-900 dark:text-white font-mono font-bold">
                       {typeof value === 'number' ? value.toLocaleString() : value}
                     </p>
                   </div>

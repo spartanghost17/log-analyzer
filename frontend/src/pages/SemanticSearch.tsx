@@ -15,15 +15,14 @@ export const SemanticSearch = () => {
 
   // Initialize state from navigation or defaults
   const [searchQuery, setSearchQuery] = useState(
-    locationState?.initialQuery || "Show me authentication failures related to the payment gateway timeout"
+    locationState?.initialQuery || ""
   );
   const [selectedResult, setSelectedResult] =
     useState<SemanticSearchResult | null>(null);
   const [filters, setFilters] = useState({
-    level: locationState?.initialFilters?.level || "ERROR",
+    level: locationState?.initialFilters?.level || "",
     service: locationState?.initialFilters?.service || "",
     timeRange: locationState?.initialFilters?.timeRange || "1h",
-    patternGrouping: true,
   });
 
   // Auto-trigger search if coming from anomaly investigation
@@ -64,22 +63,6 @@ export const SemanticSearch = () => {
     }
   };
 
-  const handleCopyLog = async () => {
-    if (!selectedResult) return;
-
-    try {
-      const logData = JSON.stringify(selectedResult, null, 2);
-      await navigator.clipboard.writeText(logData);
-      toast.success("Log copied to clipboard!", {
-        icon: "📋",
-      });
-    } catch (error) {
-      toast.error("Failed to copy to clipboard", {
-        icon: "✕",
-      });
-    }
-  };
-
   // Get all results from API
   const allResults = searchMutation.data?.results || [];
 
@@ -91,423 +74,186 @@ export const SemanticSearch = () => {
     return result.level === filters.level;
   });
 
-  // Auto-select first result when results change
-  React.useEffect(() => {
-    if (results.length > 0 && !selectedResult) {
-      setSelectedResult(results[0]);
+  // Group results by similarity clusters
+  const clusters = results.reduce((acc: Record<string, SemanticSearchResult[]>, result) => {
+    // Simple clustering based on first few words of message
+    const clusterKey = result.message.split(' ').slice(0, 3).join(' ');
+    if (!acc[clusterKey]) {
+      acc[clusterKey] = [];
     }
-  }, [results, selectedResult]);
+    acc[clusterKey].push(result);
+    return acc;
+  }, {});
 
-  const getSimilarityColor = (score: number) => {
-    if (score >= 0.95) return "bg-primary/20 text-primary";
-    if (score >= 0.85) return "bg-[#494922] text-text-muted";
-    return "bg-border-dark text-text-muted";
-  };
-
-  const getLevelBadgeColor = (level: string) => {
-    switch (level) {
-      case "ERROR":
-        return "text-red-400 border-red-900/50 bg-red-900/20";
-      case "WARN":
-        return "text-orange-400 border-orange-900/50 bg-orange-900/20";
-      case "INFO":
-        return "text-blue-400 border-blue-900/50 bg-blue-900/20";
-      default:
-        return "text-gray-400 border-gray-900/50 bg-gray-900/20";
-    }
-  };
+  const getSimilarityPercent = (score: number) => Math.round(score * 100);
 
   return (
-    <div className="flex flex-col h-full -m-6 md:-m-8 bg-[#232310]">
-      {/* Search & Header Section */}
-      <div className="shrink-0 px-6 pt-6 pb-2 border-b border-border-dark/50 bg-[#232310] z-10">
-        <div className="mx-auto w-full max-w-[1600px] flex flex-col gap-4">
-          {/* Page Heading */}
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h1 className="text-white tracking-tight text-[28px] font-bold leading-tight font-display">
-                Semantic Search & Analysis
-              </h1>
-              <p className="text-text-muted text-sm font-normal mt-1">
-                Investigate logs using natural language queries and AI-driven
-                insights.
-              </p>
-              {/* Anomaly Investigation Banner */}
-              {locationState?.fromAnomaly && (
-                <div className="mt-3 flex items-center gap-2 text-xs">
-                  <span className="material-symbols-outlined text-primary text-[16px]">science</span>
-                  <span className="text-primary font-medium">
-                    Investigating anomaly: <span className="text-white">{locationState.anomalyId}</span>
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-3 rounded-lg border border-[#686831] bg-[#2a2a15] px-4 py-2">
-              <span className="material-symbols-outlined text-primary">
-                auto_awesome
-              </span>
-              <div className="flex flex-col">
-                <span className="text-white text-xs font-bold">
-                  AI-Powered Search
-                </span>
-                <span className="text-text-muted text-xs">
-                  Using Jina Embeddings v3
-                </span>
-              </div>
-            </div>
+    <div className="flex flex-col h-full gap-8">
+      {/* Hero Section */}
+      <div className="flex flex-col items-center justify-center py-12 md:py-20 relative animate-fade-in-up">
+        <div className="mb-8 relative">
+          <div className="w-20 h-20 bg-gradient-to-b from-surface-dark to-black rounded-2xl flex items-center justify-center border border-primary/20 shadow-glow-primary">
+            <span className="material-icons-outlined text-4xl text-primary animate-pulse">psychology_alt</span>
           </div>
+          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+          </span>
+        </div>
 
-          {/* Search Bar */}
-          <div className="w-full mt-2">
-            <div className="flex flex-col h-12 w-full group">
-              <div className="flex w-full flex-1 items-center rounded-xl bg-[#2a2a15] border border-border-dark focus-within:border-primary/50 transition-colors shadow-lg shadow-black/20">
-                <div className="text-text-muted flex items-center justify-center pl-4 pr-2">
-                  <span className="material-symbols-outlined">
-                    auto_awesome
-                  </span>
-                </div>
-                <input
-                  className="flex w-full min-w-0 flex-1 bg-transparent text-white focus:outline-none placeholder:text-text-muted/70 px-2 text-base font-normal h-full font-display"
-                  placeholder="Describe the issue (e.g., 'Why did the checkout service fail at 2 AM?')..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-                />
-                <div className="pr-2">
-                  <button
-                    onClick={handleSearch}
-                    disabled={searchMutation.isPending}
-                    className="p-2 text-text-muted hover:text-white transition-colors rounded-lg disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
-                  >
-                    <span className="material-symbols-outlined">search</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+        <h2 className="text-2xl md:text-3xl font-display font-semibold text-center mb-8 dark:text-white">
+          What would you like to investigate today?
+        </h2>
 
-          {/* Chips / Filters */}
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            <select
-              value={filters.level}
-              onChange={(e) =>
-                setFilters({ ...filters, level: e.target.value })
-              }
-              className="flex h-8 shrink-0 items-center gap-x-2 rounded-lg bg-[#2a2a15] border border-border-dark hover:border-[#686831] px-3 transition-colors text-white text-xs font-medium cursor-pointer"
-            >
-              <option value="">All Levels</option>
-              <option value="ERROR">Level: Error</option>
-              <option value="WARN">Level: Warn</option>
-              <option value="INFO">Level: Info</option>
-            </select>
-
+        <div className="w-full max-w-3xl relative group">
+          <div className="absolute inset-0 bg-gradient-to-r from-primary/20 via-primary/10 to-primary/20 rounded-xl blur opacity-75 group-hover:opacity-100 transition duration-500"></div>
+          <div className="relative bg-surface-light dark:bg-[#15161C] rounded-xl border border-gray-200 dark:border-primary/30 shadow-2xl flex items-center p-1">
+            <span className="pl-4 material-icons-outlined text-primary">auto_awesome</span>
+            <input
+              className="w-full bg-transparent border-none focus:ring-0 text-lg py-4 px-4 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+              placeholder="Ask Synaps: Find logs similar to trace ID 123..."
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyPress={(e) => e.key === "Enter" && handleSearch()}
+            />
             <button
-              onClick={() =>
-                setFilters({
-                  ...filters,
-                  patternGrouping: !filters.patternGrouping,
-                })
-              }
-              className={`flex h-8 shrink-0 items-center gap-x-2 rounded-lg bg-[#2a2a15] border px-3 transition-colors cursor-pointer ${
-                filters.patternGrouping
-                  ? "border-primary/40"
-                  : "border-border-dark hover:border-[#686831]"
-              }`}
+              onClick={handleSearch}
+              disabled={searchMutation.isPending}
+              className="hidden md:flex items-center gap-2 bg-primary hover:bg-primary-hover text-black font-medium px-6 py-2.5 rounded-lg mr-1 transition-transform active:scale-95 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <span
-                className={`text-xs font-bold ${
-                  filters.patternGrouping ? "text-primary" : "text-white"
-                }`}
-              >
-                Pattern Grouping: {filters.patternGrouping ? "On" : "Off"}
-              </span>
-              {filters.patternGrouping && (
-                <span className="material-symbols-outlined text-primary text-[16px]">
-                  check
-                </span>
-              )}
+              <span>Analyze</span>
+              <span className="material-icons-outlined text-sm">arrow_forward</span>
             </button>
+          </div>
+          <div className="absolute -bottom-8 left-0 right-0 flex justify-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+            <span className="cursor-pointer hover:text-primary transition">Try: "Authentication failures last hour"</span>
+            <span className="hidden sm:inline">•</span>
+            <span className="cursor-pointer hover:text-primary transition">Try: "Latency spikes in checkout service"</span>
           </div>
         </div>
       </div>
 
-      {/* Split Pane Content */}
-      <div className="flex flex-1 overflow-hidden w-full max-w-[1600px] mx-auto">
-        {/* LEFT PANEL: Results List */}
-        <div className="w-full lg:w-5/12 xl:w-4/12 flex flex-col border-r border-border-dark/50 bg-[#232310] overflow-hidden">
-          <div className="flex items-center justify-between px-6 py-3 border-b border-border-dark/30">
-            <span className="text-xs font-bold uppercase tracking-wider text-text-muted">
-              Results ({results.length})
-            </span>
-            <span className="text-xs text-text-muted flex items-center gap-1">
-              Sorted by:{" "}
-              <span className="text-white font-medium">Similarity</span>
-            </span>
+      {/* Results Section */}
+      {searchMutation.isPending && (
+        <div className="flex items-center justify-center py-20">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        </div>
+      )}
+
+      {!searchMutation.isPending && Object.keys(clusters).length > 0 && (
+        <div className="flex-1 animate-fade-in-up" style={{ animationDelay: '150ms' }}>
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+              <span className="material-icons-outlined text-primary">bubble_chart</span>
+              Semantic Clusters
+            </h3>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500 dark:text-gray-400">Analysis timeframe:</span>
+              <select
+                value={filters.timeRange}
+                onChange={(e) => setFilters({ ...filters, timeRange: e.target.value })}
+                className="bg-transparent border border-gray-300 dark:border-gray-700 rounded text-sm text-gray-700 dark:text-gray-300 px-3 py-1 focus:ring-primary focus:border-primary"
+              >
+                <option value="1h">Last 1 Hour</option>
+                <option value="24h">Last 24 Hours</option>
+                <option value="7d">Last 7 Days</option>
+              </select>
+            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {searchMutation.isPending && (
-              <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              </div>
-            )}
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 -mt-4">
+            Synaps has detected patterns in your logs and grouped them by semantic similarity.
+          </p>
 
-            {searchMutation.isError && (
-              <div className="text-center py-12 text-red-400">
-                <span className="material-symbols-outlined text-[48px] mb-2">
-                  error
-                </span>
-                <p>Failed to search logs</p>
-              </div>
-            )}
-
-            {!searchMutation.isPending && results.length === 0 && (
-              <div className="text-center py-12 text-text-muted">
-                <span className="material-symbols-outlined text-[48px] mb-2">
-                  search
-                </span>
-                <p>Enter a query to search</p>
-              </div>
-            )}
-
-            {results.map((result, index) => {
-              const isSelected = selectedResult?.log_id === result.log_id;
-              const similarityPercent = Math.round(
-                result.similarity_score * 100
-              );
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {Object.entries(clusters).slice(0, 3).map(([clusterKey, clusterResults], idx) => {
+              const avgSimilarity = clusterResults.reduce((sum, r) => sum + r.similarity_score, 0) / clusterResults.length;
+              const dominantLevel = clusterResults[0]?.level || 'ERROR';
+              const dominantService = clusterResults[0]?.service || 'unknown';
+              const clusterColors = ['red', 'orange', 'yellow'];
+              const color = clusterColors[idx % 3];
 
               return (
                 <div
-                  key={result.log_id}
-                  onClick={() => setSelectedResult(result)}
-                  className={`group relative flex flex-col gap-2 rounded-lg border p-4 cursor-pointer transition-colors shadow-md shadow-black/20 ${
-                    isSelected
-                      ? "border-primary/50 bg-[#2a2a15]"
-                      : "border-border-dark bg-[#232310] hover:bg-[#2a2a15] hover:border-[#686831]"
-                  }`}
+                  key={clusterKey}
+                  className="group bg-white dark:bg-surface-dark border border-gray-200 dark:border-border-dark rounded-xl p-5 hover:border-primary/50 dark:hover:border-primary/50 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5 flex flex-col h-full"
                 >
-                  {isSelected && (
-                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary rounded-l-lg"></div>
-                  )}
-
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-2">
-                      <span
-                        className={`flex h-5 items-center rounded px-1.5 text-[10px] font-bold uppercase ${getSimilarityColor(
-                          result.similarity_score
-                        )}`}
-                      >
-                        {similarityPercent}% Match
-                      </span>
-                      <span className="text-xs text-text-muted font-mono">
-                        {format(new Date(result.timestamp), "HH:mm:ss.SSS")}
-                      </span>
+                      <div className={`w-2 h-2 rounded-full bg-${color}-500 ${idx === 0 ? 'animate-pulse' : ''}`}></div>
+                      <h4 className="font-medium text-gray-900 dark:text-white text-sm">
+                        Cluster: {clusterKey}
+                      </h4>
                     </div>
-                    <span
-                      className={`text-[10px] font-bold border px-1.5 rounded ${getLevelBadgeColor(
-                        result.level
-                      )}`}
-                    >
-                      {result.level}
+                    <span className="px-2 py-1 rounded bg-surface-light dark:bg-white/5 border border-gray-200 dark:border-white/10 text-xs text-gray-500 dark:text-gray-400 font-mono">
+                      {getSimilarityPercent(avgSimilarity)}% Similarity
                     </span>
                   </div>
 
-                  <p className="text-sm font-mono text-gray-200 line-clamp-2 leading-relaxed">
-                    {result.message}
-                  </p>
-
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[10px] text-text-muted bg-[#232310] px-1.5 py-0.5 rounded border border-border-dark">
-                      srv: {result.service}
-                    </span>
+                  <div className="flex-1 mb-6 relative">
+                    <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
+                    <div className="pl-4 space-y-2">
+                      {clusterResults.slice(0, 5).map((result, i) => (
+                        <p
+                          key={result.log_id}
+                          className="text-xs font-mono text-gray-500 dark:text-gray-400 line-clamp-1"
+                          style={{ opacity: 1 - (i * 0.2) }}
+                        >
+                          timestamp="{format(new Date(result.timestamp), 'yyyy-MM-dd HH:mm')}" level={result.level} msg="{result.message.substring(0, 40)}..."
+                        </p>
+                      ))}
+                    </div>
+                    <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white dark:from-surface-dark to-transparent"></div>
                   </div>
+
+                  <button className="w-full bg-primary hover:bg-primary-hover text-black font-semibold text-sm py-2.5 rounded-lg transition flex items-center justify-center gap-2 group-hover:scale-[1.02] active:scale-100">
+                    <span className="material-icons-outlined text-lg">psychology</span>
+                    Analyze with LLM
+                  </button>
                 </div>
               );
             })}
           </div>
         </div>
+      )}
 
-        {/* RIGHT PANEL: Analysis & Details */}
-        <div className="hidden lg:flex flex-1 flex-col bg-[#1a1a0c] overflow-y-auto">
-          {!selectedResult && (
-            <div className="flex items-center justify-center h-full text-text-muted">
-              <div className="text-center">
-                <span className="material-symbols-outlined text-[64px] mb-4">
-                  psychology_alt
+      {/* Recent Investigations */}
+      {!searchMutation.isPending && results.length > 0 && (
+        <div className="border-t border-gray-200 dark:border-border-dark pt-8 pb-12 mt-4 animate-fade-in-up" style={{ animationDelay: '300ms' }}>
+          <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">
+            Recent Investigations
+          </h3>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer transition group">
+              <div className="flex items-center gap-3">
+                <span className="material-icons-outlined text-gray-400 group-hover:text-primary transition">history</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Why did the payment service latency spike at 10:00 AM?
                 </span>
-                <p>Select a log to view AI analysis</p>
               </div>
+              <span className="text-xs text-gray-400">2 hours ago</span>
             </div>
-          )}
-
-          {selectedResult && (
-            <>
-              {/* AI Insight Header */}
-              <div className="sticky top-0 z-20 bg-[#1a1a0c] border-b border-border-dark px-8 py-4 flex items-center justify-between shadow-lg shadow-black/50">
-                <div className="flex items-center gap-3">
-                  <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                    <span className="material-symbols-outlined">
-                      psychology_alt
-                    </span>
-                  </div>
-                  <div>
-                    <h3 className="text-white font-bold text-lg">
-                      AI Analysis
-                    </h3>
-                    <p className="text-text-muted text-xs">
-                      Based on {results.length} semantically similar logs
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button className="flex items-center gap-2 rounded-md bg-[#2a2a15] border border-border-dark hover:border-text-muted px-3 py-1.5 transition-colors cursor-pointer">
-                    <span className="material-symbols-outlined text-text-muted text-sm">
-                      share
-                    </span>
-                    <span className="text-xs font-medium text-white">
-                      Share
-                    </span>
-                  </button>
-                </div>
+            <div className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer transition group">
+              <div className="flex items-center gap-3">
+                <span className="material-icons-outlined text-gray-400 group-hover:text-primary transition">history</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Find all logs related to user_id: 8842 with status 500
+                </span>
               </div>
-
-              <div className="p-8 max-w-4xl mx-auto w-full space-y-8">
-                {/* Summary Card */}
-                <div className="rounded-xl bg-gradient-to-br from-[#2a2a15] to-[#232310] border border-border-dark p-6 relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                    <span className="material-symbols-outlined text-8xl text-primary">
-                      auto_awesome
-                    </span>
-                  </div>
-                  <div className="relative z-10">
-                    <h4 className="text-primary font-bold text-sm mb-3 uppercase tracking-wider flex items-center gap-2">
-                      <span className="material-symbols-outlined text-lg">
-                        summarize
-                      </span>
-                      Pattern Summary
-                    </h4>
-                    <p className="text-gray-200 text-base leading-relaxed">
-                      The log shows a{" "}
-                      <span className="text-white font-bold">
-                        {selectedResult.level.toLowerCase()}
-                      </span>{" "}
-                      from the{" "}
-                      <span className="font-mono text-sm bg-black/30 px-1 rounded text-primary">
-                        {selectedResult.service}
-                      </span>{" "}
-                      service. This appears to be related to{" "}
-                      <span className="text-white font-bold">
-                        {selectedResult.message.includes("timeout")
-                          ? "timeout issues"
-                          : selectedResult.message.includes("connection")
-                          ? "connection problems"
-                          : selectedResult.message.includes("error")
-                          ? "error conditions"
-                          : "system behavior"}
-                      </span>
-                      .
-                    </p>
-                  </div>
-                </div>
-
-                {/* Similarity Score */}
-                <div className="space-y-2">
-                  <h4 className="text-white font-bold text-base">
-                    Similarity Score
-                  </h4>
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 h-2 bg-border-dark rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-primary-alt to-primary transition-all duration-500"
-                        style={{
-                          width: `${selectedResult.similarity_score * 100}%`,
-                        }}
-                      ></div>
-                    </div>
-                    <span className="text-primary font-bold font-mono">
-                      {Math.round(selectedResult.similarity_score * 100)}%
-                    </span>
-                  </div>
-                </div>
-
-                {/* Raw Log Viewer */}
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-white font-bold text-base flex items-center gap-2">
-                      <span className="material-symbols-outlined text-text-muted">
-                        data_object
-                      </span>
-                      Selected Log Data
-                    </h4>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleCopyLog}
-                        className="text-xs text-text-muted hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-sm">
-                          content_copy
-                        </span>{" "}
-                        Copy
-                      </button>
-                    </div>
-                  </div>
-                  <div className="bg-[#0f0f08] rounded-lg border border-border-dark p-4 overflow-x-auto">
-                    <pre className="font-mono text-xs leading-5">
-                      <span className="text-gray-500">
-                        // Log ID: {selectedResult.log_id}
-                      </span>
-                      {"\n"}
-                      <span className="text-yellow-500">{"{"}</span>
-                      {"\n  "}
-                      <span className="text-blue-300">"timestamp"</span>:{" "}
-                      <span className="text-green-300">
-                        "{selectedResult.timestamp}"
-                      </span>
-                      ,{"\n  "}
-                      <span className="text-blue-300">"level"</span>:{" "}
-                      <span className="text-red-400">
-                        "{selectedResult.level}"
-                      </span>
-                      ,{"\n  "}
-                      <span className="text-blue-300">"service"</span>:{" "}
-                      <span className="text-green-300">
-                        "{selectedResult.service}"
-                      </span>
-                      ,
-                      {selectedResult.trace_id && (
-                        <>
-                          {"\n  "}
-                          <span className="text-blue-300">
-                            "trace_id"
-                          </span>:{" "}
-                          <span className="text-green-300">
-                            "{selectedResult.trace_id}"
-                          </span>
-                          ,
-                        </>
-                      )}
-                      {"\n  "}
-                      <span className="text-blue-300">"message"</span>:{" "}
-                      <span className="text-green-300">
-                        "{selectedResult.message}"
-                      </span>
-                      ,{"\n  "}
-                      <span className="text-blue-300">
-                        "similarity_score"
-                      </span>:{" "}
-                      <span className="text-orange-300">
-                        {selectedResult.similarity_score}
-                      </span>
-                      {"\n"}
-                      <span className="text-yellow-500">{"}"}</span>
-                    </pre>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
+              <span className="text-xs text-gray-400">Yesterday</span>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Empty State */}
+      {!searchMutation.isPending && !searchMutation.data && (
+        <div className="text-center py-20 text-gray-500 dark:text-gray-400 animate-fade-in-up">
+          <span className="material-icons-outlined text-[64px] mb-4 opacity-50">search</span>
+          <p>Enter a query above to start your investigation</p>
+        </div>
+      )}
     </div>
   );
 };

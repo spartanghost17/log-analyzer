@@ -1,63 +1,242 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background-dark: #101c22;
-  --color-background-light: #f6f7f8;
+  /* Primary colors */
+  --color-primary: #FACC15;
+  --color-primary-hover: #EAB308;
+  --color-primary-dim: #FDE047;
+  
+  /* Background colors */
+  --color-background-light: #F3F4F6;
+  --color-background-dark: #0B0C10;
+  
+  /* Surface colors for cards/panels */
+  --color-surface-light: #FFFFFF;
+  --color-surface-dark: #15171E;
+  --color-surface-darker: #111217;
+  
+  /* Panel colors (used in Anomalies page) */
   --color-panel-dark: #16232b;
-  --color-panel-light: #2d2b15;
-  --color-border-dark: #233c48;
-  --color-primary: #facc15;
-  --color-primary-alt: #2badee;
-  --color-text-muted: #92b7c9;
-  --color-success: #22c55e;
-  --color-warning: #f97316;
-  --color-error: #facc15;
-
-  --font-family-display: Manrope, sans-serif;
-  --font-family-body: "Noto Sans", sans-serif;
-  --font-family-mono: "JetBrains Mono", monospace;
+  --color-panel-light: #1F2937;
+  
+  /* Border colors */
+  --color-border-dark: #2A2D36;
+  --color-border-light: #E5E7EB;
+  
+  /* Text colors */
+  --color-text-muted: #9CA3AF;
+  --color-text-dim: #6B7280;
+  --color-text-secondary: #9CA3AF;
+  
+  /* Accent colors */
+  --color-accent-red: #EF4444;
+  --color-accent-blue: #3B82F6;
+  --color-accent-purple: #8B5CF6;
+  
+  /* Card colors */
+  --color-card-dark: #1E1F26;
+  
+  /* Font families */
+  --font-family-display: 'Inter', sans-serif;
+  --font-family-body: 'Inter', sans-serif;
+  --font-family-mono: 'JetBrains Mono', monospace;
 }
 
-@layer base {
-  * {
-    box-sizing: border-box;
-  }
-
-  body {
-    margin: 0;
-    padding: 0;
-    background-color: var(--color-background-dark);
-    color: white;
-    font-family: var(--font-family-body);
-    min-height: 100vh;
-  }
-
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    font-family: var(--font-family-display);
-  }
+/* Base styles */
+* {
+  box-sizing: border-box;
 }
 
-/* Custom Scrollbar for 'Tactical' feel */
+html {
+  font-family: 'Inter', sans-serif;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Light mode default */
+body {
+  background-color: #F3F4F6;
+  color: #111827;
+}
+
+/* Dark mode */
+html.dark body,
+body.dark {
+  background-color: #0B0C10;
+  color: #F3F4F6;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+}
+
+/* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background-color: var(--color-background-dark);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: var(--color-border-dark);
-  border-radius: 9999px;
-  border: 2px solid var(--color-background-dark);
+  background: #4B5563;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: var(--color-primary);
+  background: #6B7280;
+}
+
+/* Animations */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(253, 224, 71, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(253, 224, 71, 0.4);
+  }
+}
+
+@keyframes flow {
+  to { stroke-dashoffset: -20; }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.6s ease-out forwards;
+  opacity: 0;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.flow-line {
+  stroke-dasharray: 5;
+  animation: flow 1s linear infinite;
+}
+
+/* Material Symbols configuration */
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}
+
+/* Glass effect utility */
+.glass-effect {
+  background: rgba(21, 23, 30, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Highlight text for reports */
+.highlight-text {
+  background-color: rgba(253, 224, 71, 0.15);
+  color: #FDE047;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* Grid background pattern */
+.grid-bg {
+  background-image: 
+    linear-gradient(to right, #1f2937 1px, transparent 1px),
+    linear-gradient(to bottom, #1f2937 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Toast notifications - Enhanced styling */
+[data-hot-toast] {
+  animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Custom toast icon styling */
+[data-hot-toast] > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Success toast icon animation */
+[data-hot-toast][data-type="success"] > div:first-child {
+  animation: scaleIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Error toast icon animation */
+[data-hot-toast][data-type="error"] > div:first-child {
+  animation: shake 0.4s ease-in-out;
+}
+
+/* Loading toast icon animation */
+.toast-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes scaleIn {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  75% {
+    transform: translateX(4px);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }

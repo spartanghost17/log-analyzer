@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { LogStreamClient, type LogEntry } from "../api/client";
 import { format } from "date-fns";
 
@@ -11,13 +11,14 @@ export const LogStream = () => {
   const [isPaused, setIsPaused] = useState(false);
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
   const [filters, setFilters] = useState({
-    info: true,
-    error: true,
-    warn: true,
-    debug: false,
-    fatal: true,
+    ERROR: true,
+    WARN: true,
+    INFO: false,
+    DEBUG: false,
+    FATAL: true,
   });
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchService, setSearchService] = useState("");
   const logContainerRef = useRef<HTMLDivElement>(null);
   const wsClientRef = useRef<LogStreamClient | null>(null);
 
@@ -27,11 +28,12 @@ export const LogStream = () => {
       setIsConnected(true);
 
       const services = [
-        "api-gateway",
         "auth-service",
         "payment-gateway",
-        "user-service",
-        "analytics",
+        "user-profile",
+        "frontend-proxy",
+        "cache-worker",
+        "notification-svc",
       ];
       const levels: Array<"INFO" | "WARN" | "ERROR" | "DEBUG" | "FATAL"> = [
         "INFO",
@@ -41,16 +43,13 @@ export const LogStream = () => {
         "FATAL",
       ];
       const messages = [
-        "Request processed successfully",
-        "Connection timeout to database after 5000ms",
-        "User authentication failed: invalid token",
-        "Payment processing completed",
-        "Rate limit exceeded for API endpoint",
-        "Cache miss for key: user_profile_123",
-        "Slow query detected: SELECT * FROM transactions",
-        "Health check ping received from load balancer",
-        "Circuit breaker opened for downstream service",
-        "Memory usage threshold exceeded",
+        "Failed to connect to database instance db-shard-04. Connection timed out after 3000ms.",
+        "Retry attempt 2/5 for transaction #tx-998231 due to high latency.",
+        "NullReferenceException: Object reference not set to an instance of an object at UserProfile.GetDetails(String id).",
+        "Token refreshed successfully for user user_8821. Expires in 3600s.",
+        "Request received: GET /api/v1/users/me (200 OK) - 45ms",
+        "Cache hit ratio: 94.2%. Evicting key: user_sess_9912.",
+        "SMTP connection failed. Provider responded with 503 Service Unavailable.",
       ];
 
       const interval = setInterval(() => {
@@ -69,9 +68,9 @@ export const LogStream = () => {
             pod_name: `pod-${Math.random().toString(36).substr(2, 6)}`,
           };
 
-          setLogs((prev) => [mockLog, ...prev].slice(0, 100));
+          setLogs((prev) => [mockLog, ...prev].slice(0, 200));
         }
-      }, 1000); // Generate a log every second
+      }, 1500); // Generate a log every 1.5 seconds
 
       return () => {
         clearInterval(interval);
@@ -83,7 +82,7 @@ export const LogStream = () => {
         // onMessage
         (log) => {
           if (!isPaused) {
-            setLogs((prev) => [log, ...prev].slice(0, 100)); // Keep last 100 logs
+            setLogs((prev) => [log, ...prev].slice(0, 200)); // Keep last 200 logs
           }
         },
         // onError
@@ -111,322 +110,305 @@ export const LogStream = () => {
   }, [isPaused]);
 
   const filteredLogs = logs.filter((log) => {
-    // Filter by level
-    const levelMatch =
-      (filters.info && log.level === "INFO") ||
-      (filters.error && log.level === "ERROR") ||
-      (filters.warn && log.level === "WARN") ||
-      (filters.debug && log.level === "DEBUG") ||
-      (filters.fatal && log.level === "FATAL");
-
+    // Filter by level checkboxes
+    const levelMatch = filters[log.level as keyof typeof filters];
     if (!levelMatch) return false;
 
     // Filter by search query
-    if (searchQuery) {
-      return (
-        log.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        log.service.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+    if (searchQuery && !log.message.toLowerCase().includes(searchQuery.toLowerCase())) {
+      return false;
+    }
+
+    // Filter by service
+    if (searchService && !log.service.toLowerCase().includes(searchService.toLowerCase())) {
+      return false;
     }
 
     return true;
   });
 
-  const getLevelColor = (level: string) => {
-    switch (level) {
-      case "FATAL":
-        return {
-          bg: "bg-red-500/20",
-          text: "text-red-400",
-          border: "border-red-500/40",
-        };
-      case "ERROR":
-        return {
-          bg: "bg-yellow-500/20",
-          text: "text-yellow-400",
-          border: "border-yellow-500/40",
-        };
-      case "WARN":
-        return {
-          bg: "bg-orange-500/10",
-          text: "text-orange-400",
-          border: "border-orange-500/20",
-        };
-      case "INFO":
-        return {
-          bg: "bg-blue-500/10",
-          text: "text-blue-400",
-          border: "border-blue-500/20",
-        };
-      case "DEBUG":
-        return {
-          bg: "bg-gray-500/10",
-          text: "text-gray-400",
-          border: "border-gray-500/20",
-        };
-      default:
-        return {
-          bg: "bg-gray-500/10",
-          text: "text-gray-400",
-          border: "border-gray-500/20",
-        };
-    }
-  };
+  const uniqueServices = Array.from(new Set(logs.map(log => log.service)));
+
+  // Calculate stats
+  const fatalCount = logs.filter(l => l.level === 'FATAL').length;
+  const errorCount = logs.filter(l => l.level === 'ERROR').length;
+  const warnCount = logs.filter(l => l.level === 'WARN').length;
+  const infoCount = logs.filter(l => l.level === 'INFO').length;
 
   return (
-    <div className="flex h-full flex-col -m-6 md:-m-8">
-      {/* Header with controls */}
-      <div className="border-b border-border-dark bg-[#111c22] p-4 shrink-0">
-        <div className="flex flex-wrap justify-between items-start gap-4 mb-4">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-white text-2xl font-bold leading-tight font-display">
-              Log Stream
-            </h1>
-            <p className="text-text-muted text-sm flex items-center gap-2">
-              <span className="relative flex h-2.5 w-2.5">
-                {isConnected && (
-                  <>
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-alt opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary-alt"></span>
-                  </>
-                )}
-                {!isConnected && (
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-error"></span>
-                )}
-              </span>
-              {isConnected ? "Listening on /api/ws/logs" : "Disconnected"}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setIsPaused(!isPaused)}
-              className="flex items-center gap-2 px-4 h-9 bg-border-dark hover:bg-white/10 text-white text-sm font-medium rounded-lg border border-transparent transition-all cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]">
-                {isPaused ? "play_arrow" : "pause"}
-              </span>
-              <span className="hidden sm:inline">
-                {isPaused ? "Resume" : "Pause"}
-              </span>
-            </button>
-            <button
-              onClick={() => setLogs([])}
-              className="flex items-center gap-2 px-4 h-9 bg-primary-alt hover:bg-blue-500 text-white text-sm font-bold rounded-lg shadow-lg shadow-primary-alt/20 transition-all cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]">
-                refresh
-              </span>
-              <span className="hidden sm:inline">Clear</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Mini stats */}
-        <div className="flex flex-col gap-2">
-          <div className="flex justify-between items-end">
-            <span className="text-xs font-bold text-text-muted uppercase">
-              Ingestion Rate
-            </span>
-            <span className="text-xs font-mono text-primary-alt">
-              {logs.length} logs buffered
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Filters bar */}
-      <div className="flex items-center gap-3 p-4 bg-panel-dark border-b border-border-dark shrink-0">
-        <div className="relative flex-1">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-text-muted">
-            search
-          </span>
-          <input
-            className="w-full h-10 pl-10 pr-4 bg-background-dark border border-border-dark rounded-lg text-white placeholder-text-muted focus:ring-1 focus:ring-primary-alt focus:border-primary-alt text-sm font-mono"
-            placeholder="Search logs (e.g., level:error OR service:payment)..."
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-
-        {/* Level Filters */}
-        <div className="flex gap-2">
-          <label className="flex items-center gap-2 px-2 py-1 bg-border-dark rounded cursor-pointer border border-transparent hover:border-text-muted/30">
-            <input
-              checked={filters.info}
-              onChange={(e) =>
-                setFilters({ ...filters, info: e.target.checked })
-              }
-              className="rounded border-gray-600 bg-background-dark text-primary-alt focus:ring-0 focus:ring-offset-0 size-3"
-              type="checkbox"
-            />
-            <span className="text-xs text-text-muted">Info</span>
-          </label>
-          <label className="flex items-center gap-2 px-2 py-1 bg-border-dark rounded cursor-pointer border border-transparent hover:border-text-muted/30">
-            <input
-              checked={filters.error}
-              onChange={(e) =>
-                setFilters({ ...filters, error: e.target.checked })
-              }
-              className="rounded border-gray-600 bg-background-dark text-primary-alt focus:ring-0 focus:ring-offset-0 size-3"
-              type="checkbox"
-            />
-            <span className="text-xs text-accent-yellow">Error</span>
-          </label>
-          <label className="flex items-center gap-2 px-2 py-1 bg-border-dark rounded cursor-pointer border border-transparent hover:border-text-muted/30">
-            <input
-              checked={filters.warn}
-              onChange={(e) =>
-                setFilters({ ...filters, warn: e.target.checked })
-              }
-              className="rounded border-gray-600 bg-background-dark text-primary-alt focus:ring-0 focus:ring-offset-0 size-3"
-              type="checkbox"
-            />
-            <span className="text-xs text-orange-400">Warn</span>
-          </label>
-        </div>
-      </div>
-
-      {/* Log Table Header */}
-      <div className="flex items-center px-4 py-2 bg-panel-dark border-b border-border-dark text-xs font-bold text-text-muted uppercase shrink-0">
-        <div className="w-36 shrink-0">Timestamp</div>
-        <div className="w-20 shrink-0">Level</div>
-        <div className="w-32 shrink-0 hidden md:block">Service</div>
-        <div className="flex-1">Message</div>
-      </div>
-
-      {/* Log Rows (Scrollable) */}
-      <div
-        ref={logContainerRef}
-        className="flex-1 overflow-y-auto bg-background-dark relative group"
-      >
-        {filteredLogs.length === 0 && (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <span className="material-symbols-outlined text-[64px] text-text-muted mb-4">
-                stream
-              </span>
-              <p className="text-text-muted text-sm">
-                {isConnected
-                  ? "Waiting for logs..."
-                  : "Disconnected. Trying to reconnect..."}
-              </p>
+    <div className="flex h-full -m-6 overflow-hidden">
+      {/* Sidebar Filter Panel */}
+      <div className="w-72 h-full bg-white dark:bg-surface-darker border-r border-gray-200 dark:border-gray-800 p-4 flex flex-col gap-6 overflow-y-auto flex-shrink-0">
+        <div>
+          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <span className="material-icons-outlined text-sm">filter_list</span> Filters
+          </h2>
+          
+          <div className="mb-6">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Level</label>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <input
+                  checked={filters.FATAL}
+                  onChange={(e) => setFilters({ ...filters, FATAL: e.target.checked })}
+                  className="rounded border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 text-purple-600 focus:ring-0 focus:ring-offset-0"
+                  type="checkbox"
+                />
+                <span className="w-2 h-2 rounded-full bg-purple-600"></span>
+                <span className="text-sm text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+                  FATAL
+                </span>
+                <span className="ml-auto text-xs text-gray-500">{fatalCount}</span>
+              </label>
+              
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <input
+                  checked={filters.ERROR}
+                  onChange={(e) => setFilters({ ...filters, ERROR: e.target.checked })}
+                  className="rounded border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 text-red-500 focus:ring-0 focus:ring-offset-0"
+                  type="checkbox"
+                />
+                <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                <span className="text-sm text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+                  ERROR
+                </span>
+                <span className="ml-auto text-xs text-gray-500">{errorCount}</span>
+              </label>
+              
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <input
+                  checked={filters.WARN}
+                  onChange={(e) => setFilters({ ...filters, WARN: e.target.checked })}
+                  className="rounded border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 text-yellow-500 focus:ring-0 focus:ring-offset-0"
+                  type="checkbox"
+                />
+                <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
+                <span className="text-sm text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+                  WARN
+                </span>
+                <span className="ml-auto text-xs text-gray-500">{warnCount}</span>
+              </label>
+              
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <input
+                  checked={filters.INFO}
+                  onChange={(e) => setFilters({ ...filters, INFO: e.target.checked })}
+                  className="rounded border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 text-blue-500 focus:ring-0 focus:ring-offset-0"
+                  type="checkbox"
+                />
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                <span className="text-sm text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+                  INFO
+                </span>
+                <span className="ml-auto text-xs text-gray-500">{infoCount}</span>
+              </label>
             </div>
           </div>
-        )}
 
-        {filteredLogs.map((log, index) => {
-          const levelColors = getLevelColor(log.level);
-          const isFatal = log.level === "FATAL";
-          const isError = log.level === "ERROR";
-          const isWarn = log.level === "WARN";
-          const isExpanded = selectedLog?.log_id === log.log_id;
+          <div className="mb-6">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Service</label>
+            <div className="relative">
+              <span className="material-icons-outlined absolute left-2 top-2.5 text-gray-500 text-xs">search</span>
+              <input
+                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs py-2 pl-7 pr-2 text-gray-700 dark:text-gray-300 focus:border-primary focus:ring-0"
+                placeholder="Search services..."
+                type="text"
+                value={searchService}
+                onChange={(e) => setSearchService(e.target.value)}
+              />
+            </div>
+            <div className="mt-2 space-y-1 max-h-32 overflow-y-auto pr-1">
+              {uniqueServices.slice(0, 6).map(service => (
+                <label key={service} className="flex items-center gap-2 cursor-pointer py-1 px-1 rounded hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                  <input
+                    checked={!searchService || service.includes(searchService)}
+                    onChange={() => setSearchService(service)}
+                    className="rounded border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 text-primary focus:ring-0 focus:ring-offset-0"
+                    type="radio"
+                    name="service"
+                  />
+                  <span className="text-sm text-gray-600 dark:text-gray-400">{service}</span>
+                </label>
+              ))}
+            </div>
+          </div>
 
-          return (
-            <div
-              key={`${log.log_id}-${index}`}
-              className={
-                isExpanded
-                  ? "flex flex-col border-b border-white/5 bg-[#142028]"
-                  : ""
-              }
-            >
-              <div
-                onClick={() => setSelectedLog(isExpanded ? null : log)}
-                className={`flex items-start px-4 py-2 border-b transition-colors cursor-pointer group/row ${
-                  isFatal
-                    ? "bg-red-500/10 border-red-500/20 hover:bg-red-500/15"
-                    : isError
-                    ? "bg-yellow-500/10 border-yellow-500/20 hover:bg-yellow-500/15"
-                    : isWarn
-                    ? "bg-orange-500/5 border-orange-500/10 hover:bg-orange-500/10"
-                    : "border-white/5 hover:bg-white/5"
-                } ${isExpanded ? "border-l-2 border-primary-alt" : ""}`}
-              >
-                <div
-                  className={`w-36 shrink-0 font-mono text-xs pt-0.5 ${
-                    isFatal
-                      ? "text-red-400"
-                      : isError
-                      ? "text-yellow-400"
-                      : isWarn
-                      ? "text-orange-400"
-                      : "text-text-muted"
-                  }`}
-                >
-                  {format(new Date(log.timestamp), "MMM dd HH:mm:ss.SSS")}
-                </div>
-                <div className="w-20 shrink-0 pt-0.5">
-                  <span
-                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${levelColors.bg} ${levelColors.text} border ${levelColors.border}`}
-                  >
-                    {log.level}
-                  </span>
-                </div>
-                <div
-                  className={`w-32 shrink-0 hidden md:block text-xs pt-0.5 ${
-                    isFatal
-                      ? "text-red-400"
-                      : isError
-                      ? "text-yellow-400"
-                      : isWarn
-                      ? "text-orange-400"
-                      : "text-text-muted"
-                  }`}
-                >
-                  {log.service}
-                </div>
-                <div
-                  className={`flex-1 font-mono text-sm break-all leading-relaxed ${
-                    isFatal
-                      ? "text-red-300"
-                      : isError
-                      ? "text-yellow-300"
-                      : isWarn
-                      ? "text-orange-300"
-                      : "text-gray-300"
-                  }`}
-                >
-                  {log.message}
-                </div>
-                <div className="w-8 shrink-0 flex justify-end opacity-0 group-hover/row:opacity-100">
-                  <span className="material-symbols-outlined text-text-muted text-[16px]">
-                    {isExpanded ? "expand_less" : "expand_more"}
-                  </span>
+          <div className="mb-6">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Time Range</label>
+            <div className="flex items-center gap-2 mb-2">
+              <button className="flex-1 py-1 px-2 text-xs rounded bg-primary text-gray-900 font-medium border border-primary">
+                1h
+              </button>
+              <button className="flex-1 py-1 px-2 text-xs rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-transparent hover:border-gray-300 dark:hover:border-gray-600">
+                24h
+              </button>
+              <button className="flex-1 py-1 px-2 text-xs rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-transparent hover:border-gray-300 dark:hover:border-gray-600">
+                7d
+              </button>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-700">
+              <div className="flex justify-between text-xs text-gray-500 mb-1">
+                <span>Start</span>
+                <span>End</span>
+              </div>
+              <div className="h-8 flex items-end gap-0.5 mb-2 opacity-60">
+                {[2, 3, 5, 8, 4, 2, 1, 3, 6, 4, 2, 1, 3, 7, 5].map((h, i) => (
+                  <div
+                    key={i}
+                    className={`w-1 rounded-t-sm ${[2, 3, 4, 8, 13].includes(i) ? 'bg-primary' : 'bg-gray-400'}`}
+                    style={{ height: `${h * 12.5}%` }}
+                  ></div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-auto">
+          <div className="p-3 bg-gradient-to-br from-indigo-900 to-purple-900 rounded-lg border border-indigo-700 relative overflow-hidden">
+            <div className="absolute -top-6 -right-6 w-16 h-16 bg-primary opacity-20 rounded-full blur-xl"></div>
+            <h3 className="text-white text-sm font-semibold mb-1 relative z-10">AI Insights</h3>
+            <p className="text-indigo-200 text-xs mb-3 relative z-10">
+              {fatalCount + errorCount + warnCount} anomalies detected in the last hour.
+            </p>
+            <button className="w-full bg-white/10 hover:bg-white/20 text-white text-xs py-1.5 rounded border border-white/10 transition-colors">
+              Analyze
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Log Explorer */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-background-light dark:bg-background-dark p-4">
+        {/* Search Bar */}
+        <div className="mb-4 flex gap-3">
+          <div className="flex-1 relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <span className="material-icons-outlined text-gray-500 dark:text-gray-400">code</span>
+            </div>
+            <input
+              className="block w-full pl-10 pr-12 py-3 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent font-mono shadow-sm"
+              placeholder='msg="database timeout" service="payment" level=error'
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+              <span className="text-xs text-gray-400 border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5">/</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsPaused(!isPaused)}
+            className="bg-primary hover:bg-yellow-400 text-gray-900 font-medium py-2 px-4 rounded-lg flex items-center gap-2 shadow-sm shadow-primary/20 transition-all"
+          >
+            <span className="material-icons-outlined text-sm">{isPaused ? 'play_arrow' : 'pause'}</span>
+            {isPaused ? 'Run' : 'Pause'}
+          </button>
+          <button
+            onClick={() => {
+              setLogs([]);
+              setSearchQuery("");
+            }}
+            className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 py-2 px-4 rounded-lg flex items-center gap-2 shadow-sm transition-all"
+          >
+            <span className="material-icons-outlined text-sm">save_alt</span>
+            Export
+          </button>
+        </div>
+
+        {/* Log Table */}
+        <div className="flex-1 bg-white dark:bg-surface-dark rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col shadow-sm overflow-hidden">
+          {/* Table Header */}
+          <div className="grid grid-cols-12 gap-4 px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            <div className="col-span-2 flex items-center gap-1 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200">
+              Timestamp
+              <span className="material-icons-outlined text-xs">arrow_downward</span>
+            </div>
+            <div className="col-span-1 flex items-center gap-1 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200">
+              Level
+            </div>
+            <div className="col-span-2 flex items-center gap-1 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200">
+              Service
+            </div>
+            <div className="col-span-7 flex items-center gap-1 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200">
+              Message
+            </div>
+          </div>
+
+          {/* Table Body */}
+          <div ref={logContainerRef} className="overflow-y-auto flex-1 font-mono text-sm">
+            {filteredLogs.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <span className="material-icons-outlined text-[64px] text-gray-400 mb-4">dns</span>
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">
+                    {isConnected ? "Waiting for logs..." : "Disconnected. Trying to reconnect..."}
+                  </p>
                 </div>
               </div>
+            ) : (
+              filteredLogs.map((log, index) => {
+                const isExpanded = selectedLog?.log_id === log.log_id;
+                const isError = log.level === 'ERROR';
+                const isWarn = log.level === 'WARN';
+                const isFatal = log.level === 'FATAL';
+                const isHighlight = isFatal || (isError && index % 3 === 0);
 
-              {/* Detail View */}
-              {isExpanded && (
-                <div className="px-4 py-3 pl-12 bg-black/20 font-mono text-xs text-text-muted overflow-x-auto">
-                  <pre className="whitespace-pre-wrap">
-                    {JSON.stringify(log, null, 2)}
-                  </pre>
-                </div>
-              )}
+                return (
+                  <div
+                    key={`${log.log_id}-${index}`}
+                    onClick={() => setSelectedLog(isExpanded ? null : log)}
+                    className={`grid grid-cols-12 gap-4 px-6 py-3 border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group cursor-pointer items-start ${
+                      isHighlight ? 'bg-yellow-50/50 dark:bg-primary/5' : ''
+                    }`}
+                  >
+                    <div className="col-span-2 text-gray-500 dark:text-gray-400 text-xs mt-0.5">
+                      {format(new Date(log.timestamp), "yyyy-MM-dd HH:mm:ss.SSS")}
+                    </div>
+                    <div className="col-span-1">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                          isFatal
+                            ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
+                            : isError
+                            ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                            : isWarn
+                            ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                            : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+                        }`}
+                      >
+                        {log.level}
+                      </span>
+                    </div>
+                    <div className="col-span-2 text-blue-600 dark:text-blue-400 truncate mt-0.5">
+                      {log.service}
+                    </div>
+                    <div className="col-span-7 text-gray-800 dark:text-gray-300 break-all leading-relaxed">
+                      <span className="text-gray-400 select-none mr-2">msg=</span>
+                      {log.message}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-surface-darker px-4 py-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+            <div>
+              Showing <span className="font-medium text-gray-900 dark:text-white">1</span> to{' '}
+              <span className="font-medium text-gray-900 dark:text-white">{Math.min(50, filteredLogs.length)}</span> of{' '}
+              <span className="font-medium text-gray-900 dark:text-white">{filteredLogs.length}</span> results
             </div>
-          );
-        })}
-      </div>
-
-      {/* Footer */}
-      <div className="bg-[#111c22] border-t border-border-dark px-4 py-1.5 flex justify-between items-center text-[10px] text-text-muted shrink-0">
-        <div className="flex gap-4">
-          <span>
-            Logs: {filteredLogs.length} / {logs.length}
-          </span>
-          <span>Filtered: {logs.length - filteredLogs.length}</span>
-        </div>
-        <div className="flex gap-4">
-          <span className="flex items-center gap-1">
-            <span
-              className={`size-1.5 rounded-full ${
-                isConnected ? "bg-green-500" : "bg-error"
-              }`}
-            ></span>
-            {isConnected ? "Live" : "Disconnected"}
-          </span>
-          <span>v1.0.0</span>
+            <div className="flex gap-2">
+              <button className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-surface-dark hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50" disabled>
+                Previous
+              </button>
+              <button className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-surface-dark hover:bg-gray-50 dark:hover:bg-gray-700">
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

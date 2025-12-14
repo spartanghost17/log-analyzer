@@ -1,58 +1,55 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 
-const NavItem = ({ to, icon, label }: { to: string; icon: string; label: string }) => (
+const NavItem = ({ to, icon, label }: { to: string; icon: string; label: string }) => {
+  const location = useLocation();
+  const isActive = location.pathname === to || (to !== '/' && location.pathname.startsWith(to));
+
+  return (
     <NavLink
-        to={to}
-        className={({ isActive }) =>
-            `group flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${isActive
-                ? 'bg-primary text-background-dark'
-                : 'text-text-muted hover:bg-border-dark hover:text-white'
-            }`
-        }
-        title={label}
+      to={to}
+      className={`group relative h-10 w-10 mx-auto flex items-center justify-center rounded-lg transition-all ${
+        isActive
+          ? 'bg-primary text-black shadow-[0_0_15px_rgba(253,224,71,0.3)]'
+          : 'text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800'
+      }`}
+      title={label}
     >
-        <span className="material-symbols-outlined text-[24px]">{icon}</span>
-        <span className="hidden lg:block text-sm font-bold">{label}</span>
+      <span className="material-icons-outlined text-xl">{icon}</span>
+      <span className="absolute left-full ml-2 px-2 py-1 bg-gray-800 text-xs text-white rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+        {label}
+      </span>
     </NavLink>
-);
+  );
+};
 
 export const Sidebar = () => {
-    return (
-        <aside className="w-20 lg:w-64 flex flex-col items-center lg:items-stretch border-r border-border-dark bg-background-dark py-6 lg:px-4 shrink-0 transition-all duration-300">
-            {/* Brand */}
-            <div className="flex items-center gap-3 px-2 mb-8">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary">
-                    <span className="material-symbols-outlined text-[24px]">bubble_chart</span>
-                </div>
-                <div className="hidden lg:flex flex-col">
-                    <h1 className="text-lg font-bold leading-tight tracking-tight text-white font-display">SYNAPS</h1>
-                    <p className="text-xs font-medium text-text-muted">Log Analysis System</p>
-                </div>
-            </div>
+  return (
+    <aside className="w-16 md:w-20 bg-white dark:bg-surface-darker border-r border-gray-200 dark:border-gray-800 flex flex-col items-center py-6 gap-6 z-20 flex-shrink-0">
+      {/* Brand */}
+      <div className="mb-4">
+        <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center text-primary cursor-pointer hover:bg-primary/30 transition">
+          <span className="material-icons-outlined text-2xl">psychology</span>
+        </div>
+      </div>
 
-            {/* Navigation */}
-            <nav className="flex flex-1 flex-col gap-2">
-                <NavItem to="/" icon="dashboard" label="Dashboard" />
-                <NavItem to="/stream" icon="stream" label="Log Stream" />
-                <NavItem to="/analysis" icon="manage_search" label="Analysis" />
-                <NavItem to="/reports" icon="description" label="Reports" />
-                <NavItem to="/anomalies" icon="warning" label="Anomalies" />
-            </nav>
+      {/* Navigation */}
+      <nav className="flex flex-col gap-4 w-full px-2">
+        <NavItem to="/" icon="grid_view" label="Dashboard" />
+        <NavItem to="/stream" icon="dns" label="Data Cortex" />
+        <NavItem to="/analysis" icon="search" label="Cognitive Search" />
+        <NavItem to="/reports" icon="article" label="Insight Pathways" />
+        <NavItem to="/anomalies" icon="timeline" label="Metrics" />
+        <NavItem to="/topology" icon="hub" label="Topology" />
+      </nav>
 
-            {/* Bottom Actions */}
-            <div className="flex flex-col gap-2 border-t border-border-dark pt-6 mt-auto">
-                <NavItem to="/settings" icon="settings" label="Settings" />
-                <div className="px-3 py-3 flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-full bg-border-dark border border-white/10 flex items-center justify-center text-text-muted font-bold text-xs">
-                        JD
-                    </div>
-                    <div className="hidden lg:flex flex-col">
-                        <span className="text-sm font-bold text-white">John Doe</span>
-                        <span className="text-xs text-text-muted">Admin</span>
-                    </div>
-                </div>
-            </div>
-        </aside>
-    );
+      {/* Bottom Actions */}
+      <div className="mt-auto flex flex-col gap-4">
+        <button className="h-10 w-10 mx-auto flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <span className="material-icons-outlined text-xl">settings</span>
+        </button>
+        <div className="h-8 w-8 mx-auto rounded-full bg-gradient-to-tr from-primary to-orange-400 border border-white dark:border-gray-700"></div>
+      </div>
+    </aside>
+  );
 };
