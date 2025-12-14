@@ -14,6 +14,7 @@ Features:
 
 import hashlib
 import json
+import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -30,15 +31,16 @@ from pybreaker import CircuitBreaker, CircuitBreakerError
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 from tenacity import (
-    retry,
+    AsyncRetrying,
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
     before_sleep_log
 )
 
-from settings import setup_development_logging, get_logger
+from settings import setup_production_logging, setup_development_logging, get_logger
 
+#setup_production_logging()
 setup_development_logging()
 logger = get_logger(__name__)
 
@@ -63,6 +65,7 @@ class Settings(BaseSettings):
     jina_task_type: str = Field(default="text-matching", validation_alias="JINA_TASK_TYPE")
     jina_api_url: str = Field(default="https://api.jina.ai/v1/embeddings", validation_alias="JINA_API_URL")
     jina_timeout: int = Field(default=30, validation_alias="JINA_TIMEOUT")
+    matryoshka_dimensions: int = Field(default=768, validation_alias="MATRYOSHKA_DIMENSIONS")  # Jina v3 Matryoshka truncation
 
     # Performance settings
     max_batch_size: int = Field(default=100, validation_alias="MAX_BATCH_SIZE")
@@ -213,7 +216,7 @@ class JinaEmbeddingsService:
         # Circuit breaker for Jina API
         self.circuit_breaker = CircuitBreaker(
             fail_max=settings.circuit_breaker_fail_max,
-            timeout_duration=settings.circuit_breaker_timeout,
+            # timeout_duration=settings.circuit_breaker_timeout,
             name="JinaAPI"
         )
 
@@ -311,61 +314,78 @@ class JinaEmbeddingsService:
         except Exception as e:
             CACHE_ERRORS.inc()
             self.logger.warning("cache_set_error", error=str(e))
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException)),
-        before_sleep=before_sleep_log(logger, structlog.INFO),
-        reraise=True
-    )
+    
     async def _call_jina_api(self, texts: List[str]) -> List[List[float]]:
         """
-        Call Jina API with retry logic and circuit breaker
+        Call Jina API with simple manual retry logic and circuit breaker
+        
+        No tenacity dependency - just plain Python retry loop
 
         Raises:
             CircuitBreakerError: If circuit breaker is open
             HTTPException: If API call fails after retries
         """
+        import asyncio
+        
         request_id = request_id_var.get()
 
-        # Update circuit breaker state metric
-        state_map = {'closed': 0, 'open': 1, 'half-open': 2}
-        CIRCUIT_BREAKER_STATE.set(state_map.get(self.circuit_breaker.current_state, 0))
-
-        try:
-            # Call API through circuit breaker
-            response = await self.circuit_breaker.call_async(
-                self.http_client.post,
-                self.settings.jina_api_url,
-                json={
-                    "model": self.settings.jina_model,
-                    "task": self.settings.jina_task_type,
-                    "input": texts
-                },
-                headers={
-                    "Authorization": f"Bearer {self.settings.jina_api_key}",
-                    "Content-Type": "application/json",
-                    "X-Request-ID": request_id
-                }
-            )
-
-            response.raise_for_status()
-            data = response.json()
-
-            # Extract embeddings from response
-            embeddings = [item["embedding"] for item in data["data"]]
-            return embeddings
-
-        except CircuitBreakerError:
-            CIRCUIT_BREAKER_FAILURES.inc()
-            self.logger.error("circuit_breaker_open",
-                            state=self.circuit_breaker.current_state,
-                            request_id=request_id)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Jina API circuit breaker is open - service temporarily unavailable"
-            )
+        # Simple manual retry loop (circuit breaker disabled due to pybreaker bugs)
+        max_attempts = 3
+        last_error = None
+        
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Make API call directly
+                response = await self.http_client.post(
+                    self.settings.jina_api_url,
+                    json={
+                        "model": self.settings.jina_model,
+                        "task": self.settings.jina_task_type,
+                        "dimensions": self.settings.matryoshka_dimensions,
+                        "input": texts
+                    },
+                    headers={
+                        "Authorization": f"Bearer {self.settings.jina_api_key}",
+                        "Content-Type": "application/json",
+                        "X-Request-ID": request_id
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                # Extract embeddings from response
+                embeddings = [item["embedding"] for item in data["data"]]
+                return embeddings
+            
+            except (httpx.HTTPError, httpx.TimeoutException) as e:
+                last_error = e
+                
+                if attempt < max_attempts:
+                    # Exponential backoff: 1s, 2s, 4s (capped at 10s)
+                    wait_time = min(2 ** (attempt - 1), 10)
+                    
+                    API_RETRIES.inc()
+                    self.logger.warning("api_retry_attempt",
+                                      attempt=attempt,
+                                      max_attempts=max_attempts,
+                                      wait_seconds=wait_time,
+                                      error=str(e),
+                                      error_type=type(e).__name__,
+                                      request_id=request_id)
+                    
+                    await asyncio.sleep(wait_time)
+                else:
+                    # All retries exhausted
+                    self.logger.error("api_retry_exhausted",
+                                    attempts=max_attempts,
+                                    error=str(e),
+                                    error_type=type(e).__name__,
+                                    request_id=request_id)
+                    raise
+        
+        # Should never reach here, but just in case
+        if last_error:
+            raise last_error
 
     async def generate_embeddings(self, texts: List[str]) -> tuple[List[List[float]], List[bool]]:
         """
