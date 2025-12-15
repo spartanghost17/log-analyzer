@@ -48,23 +48,27 @@ services:
     networks:
       - log-network
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
     command: >
       bash -c "
-      
+
       # Format storage if not already formatted
-      
+
       if [ ! -f /var/lib/kafka/data/.formatted ]; then
         kafka-storage format -t $${CLUSTER_ID} -c /etc/kafka/kafka.properties
         touch /var/lib/kafka/data/.formatted
       fi
-      
+
       # Start Kafka
-      
+
       /etc/confluent/docker/run
       "
 
@@ -91,8 +95,8 @@ services:
     image: clickhouse/clickhouse-server:25.11
     container_name: clickhouse
     ports:
-      - "8123:8123"  # HTTP interface
-      - "9000:9000"  # Native client
+      - "8123:8123" # HTTP interface
+      - "9000:9000" # Native client
     environment:
       CLICKHOUSE_DB: logs_db
       CLICKHOUSE_USER: admin
@@ -126,8 +130,8 @@ services:
     image: qdrant/qdrant:v1.7.4
     container_name: qdrant
     ports:
-      - "6333:6333"  # REST API
-      - "6334:6334"  # gRPC
+      - "6333:6333" # REST API
+      - "6334:6334" # gRPC
     environment:
       QDRANT__SERVICE__GRPC_PORT: 6334
       QDRANT__STORAGE__STORAGE_PATH: /qdrant/storage
@@ -136,7 +140,8 @@ services:
     networks:
       - log-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      #test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -181,7 +186,7 @@ services:
     networks:
       - log-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin"]
+      test: ["CMD-SHELL", "pg_isready -U admin -d log_analysis"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -343,7 +348,7 @@ services:
   # PHASE 2: VECTOR SEARCH & EMBEDDINGS
   # ============================================
 
- # Jina Embeddings Service - Generates text embeddings via Jina AI API
+  # Jina Embeddings Service - Generates text embeddings via Jina AI API
   jina-embeddings:
     build:
       context: ./services/jina-embeddings
@@ -355,14 +360,15 @@ services:
       SERVICE_NAME: jina-embeddings
       HOST: "0.0.0.0"
       PORT: "8003"
-      JINA_API_KEY: ${JINA_API_KEY}  # Set in .env file
-      JINA_MODEL: "jina-embeddings-v3" #"jina-embeddings-v2-base-en"
-      JINA_TASK_TYPE: "text-matching"
-      JINA_API_URL: "https://api.jina.ai/v1/embeddings"
+      JINA_API_KEY: ${JINA_API_KEY} # Set in .env file
+      JINA_MODEL: jina-embeddings-v3 #"jina-embeddings-v2-base-en"
+      JINA_TASK_TYPE: text-matching
+      JINA_API_URL: https://api.jina.ai/v1/embeddings
       JINA_TIMEOUT: 30
+      MATRYOSHKA_DIMENSIONS: 768
       MAX_BATCH_SIZE: 100
       MAX_TEXT_LENGTH: 8192
-      REDIS_HOST: "redis"
+      REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: 0
       CACHE_TTL: 86400
@@ -372,7 +378,7 @@ services:
       RETRY_ATTEMPTS: 3
       RETRY_MIN_WAIT: 1
       RETRY_MAX_WAIT: 10
-      LOG_LEVEL: "INFO"
+      LOG_LEVEL: INFO
     networks:
       - log-network
     restart: unless-stopped
@@ -383,7 +389,7 @@ services:
       retries: 3
       start_period: 10s
 
-#  # Vectorization Worker - Processes logs and stores in Qdrant
+  #  # Vectorization Worker - Processes logs and stores in Qdrant
   vectorization-worker:
     build:
       context: ./services/vectorization-worker
@@ -407,13 +413,18 @@ services:
       KAFKA_GROUP_ID: vectorization-worker-group
       KAFKA_AUTO_OFFSET_RESET: earliest
       JINA_SERVICE_URL: http://jina-embeddings:8003
-      JINA_TIMEOUT: "30"
+      JINA_TIMEOUT: 30
       QDRANT_HOST: qdrant
-      QDRANT_PORT: "6333"
+      QDRANT_PORT: 6333
       QDRANT_COLLECTION: log_embeddings
-      BATCH_SIZE: "10"
-      BATCH_TIMEOUT_SECONDS: "5.0"
-      MAX_RETRIES: "3"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123 #use http instead of 9000 (native-client)
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: clickhouse_password
+      CLICKHOUSE_DATABASE: logs_db
+      BATCH_SIZE: 10
+      BATCH_TIMEOUT_SECONDS: 5.0
+      MAX_RETRIES: 3
     networks:
       - log-network
     restart: unless-stopped
@@ -423,10 +434,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-
-  # ============================================
-  # PHASE 3: API GATEWAY
-  # ============================================
+  #
+  #  # ============================================
+  #  # PHASE 3: API GATEWAY
+  #  # ============================================
 
   # FastAPI Backend - Unified API Gateway
   api:
@@ -454,22 +465,22 @@ services:
       PORT: "8005"
       # ClickHouse
       CLICKHOUSE_HOST: clickhouse
-      CLICKHOUSE_PORT: "8123" #use http instead of 9000 (native-client)
+      CLICKHOUSE_PORT: 9000 #8123 #use http instead of 9000 (native-client)
       CLICKHOUSE_USER: admin
       CLICKHOUSE_PASSWORD: clickhouse_password
       CLICKHOUSE_DATABASE: logs_db
       # PostgreSQL
       POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      POSTGRES_PORT: 5432
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: postgres_password
       POSTGRES_DB: log_analysis
       # Qdrant
       QDRANT_HOST: qdrant
-      QDRANT_PORT: "6333"
+      QDRANT_PORT: 6333
       # Redis
       REDIS_HOST: redis
-      REDIS_PORT: "6379"
+      REDIS_PORT: 6379
       REDIS_DB: 0
       CACHE_TTL: 300 # 300sec = 5 minutes
       # Jina
@@ -485,31 +496,30 @@ services:
       retries: 3
       start_period: 60s
 
-  # ============================================
-  # PHASE 3: REACT FRONTEND
-  # ============================================
+  #  # ============================================
+  #  # PHASE 3: REACT FRONTEND
+  #  # ============================================
+  #
+  #  # React Frontend with shadcn/ui
+  #  frontend:
+  #    build:
+  #      context: ./frontend
+  #      dockerfile: Dockerfile
+  #    container_name: frontend
+  #    depends_on:
+  #      api:
+  #        condition: service_healthy
+  #    ports:
+  #      - "3000:80"
+  #    environment:
+  #      VITE_API_URL: http://api:8005/api
+  #    networks:
+  #      - log-network
+  #    restart: unless-stopped
 
-  # React Frontend with shadcn/ui
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: frontend
-    depends_on:
-      api:
-        condition: service_healthy
-    ports:
-      - "3000:80"
-    environment:
-      VITE_API_URL: http://api:8005/api
-    networks:
-      - log-network
-    restart: unless-stopped
-
-
-# ===============================================
-# Observability
-# ===============================================
+  # ===============================================
+  # Observability
+  # ===============================================
   cloudbeaver:
     image: dbeaver/cloudbeaver:latest
     container_name: cloudbeaver
