@@ -64,13 +64,13 @@ class ResolveRequest(BaseModel):
 
 def get_db() -> DatabaseService:
     """Get database service instance"""
-    from ..app import db_service
+    from app import db_service
     return db_service
 
 
 def get_cache() -> CacheService:
     """Get cache service instance"""
-    from ..app import cache_service
+    from app import cache_service
     return cache_service
 
 

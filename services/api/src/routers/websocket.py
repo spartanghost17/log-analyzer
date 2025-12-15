@@ -78,7 +78,7 @@ async def websocket_logs(
 
     try:
         # Import here to avoid circular dependency
-        from ..app import db_service
+        from app import db_service
         db: DatabaseService = db_service
 
         # Track last seen log ID to avoid duplicates

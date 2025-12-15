@@ -32,13 +32,13 @@ class ErrorCluster(BaseModel):
 
 def get_qdrant() -> QdrantService:
     """Get Qdrant service from app state"""
-    from ..app import qdrant_service
+    from app import qdrant_service
     return qdrant_service
 
 
 def get_cache() -> CacheService:
     """Get cache service from app state"""
-    from ..app import cache_service
+    from app import cache_service
     return cache_service
 
 

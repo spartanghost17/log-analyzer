@@ -84,17 +84,17 @@ class SummaryReport(BaseModel):
 # ============================================================================
 
 def get_db() -> DatabaseService:
-    from ..app import db_service
+    from app import db_service
     return db_service
 
 
 def get_qdrant() -> QdrantService:
-    from ..app import qdrant_service
+    from app import qdrant_service
     return qdrant_service
 
 
 def get_cache() -> CacheService:
-    from ..app import cache_service
+    from app import cache_service
     return cache_service
 
 
