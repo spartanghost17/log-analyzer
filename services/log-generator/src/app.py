@@ -11,7 +11,7 @@ import random
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Optional, Dict
 
@@ -172,53 +172,288 @@ class GeneratorStats(BaseModel):
 class LogGeneratorService:
     """Log generator service with Kafka producer"""
 
-    # Realistic log messages
+    # Environments to cycle through
+    ENVIRONMENTS = ["production", "staging", "development"]
+
+    # Realistic INFO log messages (more detailed and varied)
     INFO_MESSAGES = [
-        "Request processed successfully",
-        "User authentication successful",
-        "Database query completed in {time}ms",
-        "Cache hit for key: {key}",
-        "API response time: {time}ms",
-        "Background job completed",
-        "Session created for user {user}",
-        "Payment processed successfully",
-        "Email notification sent",
-        "File uploaded successfully"
+        "Request processed successfully for endpoint /api/v1/users/{user_id} - returned 200 OK in {time}ms",
+        "User authentication successful for user {user} via OAuth2 token - session established with TTL 3600s",
+        "Database query completed successfully: SELECT * FROM orders WHERE status='pending' LIMIT 100 - execution time: {time}ms",
+        "Cache hit for key: {key} - retrieved 2.3KB payload from Redis cluster node redis-prod-02",
+        "API response time for GET /api/v1/products: {time}ms - cache hit ratio: 87.3% - served from CDN edge node",
+        "Background job 'daily-report-generator' completed successfully - processed 45,892 records in 23.4 seconds",
+        "Session created for user {user} with IP 192.168.1.{ip} - device fingerprint: {fingerprint}",
+        "Payment transaction processed successfully - amount: ${amount} USD - gateway: Stripe - transaction_id: {tx_id}",
+        "Email notification sent to {email} via SendGrid - template: 'order-confirmation' - delivery confirmed in 1.2s",
+        "File uploaded successfully to S3 bucket 'prod-user-uploads' - file: {filename} - size: {size}MB - ETag: {etag}",
+        "WebSocket connection established from client {client_id} - protocol: ws:// - heartbeat interval: 30s",
+        "Message published to Kafka topic 'user-events' - partition: 3 - offset: 891234 - key: {key}",
+        "Service health check passed - all dependencies responding - latency: DB={db_latency}ms, Redis={redis_latency}ms",
+        "Rate limiter check passed for user {user} - current: 47/1000 requests - window: 60s - burst allowed",
+        "Scheduled task 'cleanup-old-sessions' executed - removed 234 expired sessions - next run in 3600s",
+        "JWT token validated successfully - issuer: auth.example.com - expiry: 2h - scopes: ['read', 'write']",
+        "GraphQL query resolved in {time}ms - query depth: 4 - fields: 23 - resolver cache hits: 18/23",
+        "gRPC call completed successfully - method: /user.UserService/GetProfile - duration: {time}ms - status: OK",
+        "CircuitBreaker state transition: CLOSED -> CLOSED - success rate: 99.2% - error threshold: 50%",
+        "Distributed lock acquired for resource 'payment-processor-lock' - holder: pod-{pod} - TTL: 30s"
     ]
 
+    # Realistic ERROR log messages with context
     ERROR_MESSAGES = [
-        "Connection timeout to database after {time}ms",
-        "Failed to authenticate user: invalid credentials",
-        "Payment processing failed: insufficient funds",
-        "Database query timeout after {time}ms",
-        "External API returned 500 error",
-        "Failed to send email notification",
-        "File upload failed: size limit exceeded",
-        "Redis connection lost",
-        "Failed to acquire database lock",
-        "Rate limit exceeded for user {user}"
+        ("Connection timeout to PostgreSQL database after {time}ms - host: db-prod-01.internal:5432 - connection pool exhausted (50/50 connections in use)", "db_timeout"),
+        ("Failed to authenticate user: invalid credentials provided - username: {user} - attempt 3/3 - account locked for 15 minutes", "auth_failed"),
+        ("Payment processing failed: insufficient funds in account - requested: ${amount} USD - available: ${available} USD - gateway response: declined", "payment_insufficient_funds"),
+        ("Database query timeout after {time}ms - query: SELECT * FROM transactions WHERE date > '2024-01-01' - affected table: transactions (2.3M rows) - lock wait timeout exceeded", "db_lock_timeout"),
+        ("External API call to payment-gateway.example.com failed - HTTP 500 Internal Server Error - response time: {time}ms - retries exhausted (3/3)", "external_api_error"),
+        ("Failed to send email notification via SendGrid API - recipient: {email} - error: 'Invalid API key' - status: 401 Unauthorized", "email_send_failed"),
+        ("File upload rejected: size limit exceeded - uploaded: {size}MB - max allowed: 10MB - filename: {filename}", "file_size_exceeded"),
+        ("Redis connection lost to redis-prod-cluster.internal:6379 - error: 'Connection refused' - failover to replica node failed - cache unavailable", "redis_connection_lost"),
+        ("Failed to acquire database lock for table 'inventory' - lock holder: transaction_id={tx_id} - wait time exceeded: 30s - deadlock detected", "db_lock_failed"),
+        ("Rate limit exceeded for API key: {key} - current: 1001/1000 requests - window: 60s - client IP: 203.0.113.{ip}", "rate_limit_exceeded"),
+        ("Kafka consumer group rebalancing failed - topic: 'order-events' - error: 'Group coordinator not available' - retrying in 5s", "kafka_rebalance_failed"),
+        ("S3 bucket operation failed - operation: PutObject - bucket: 'prod-uploads' - error: 'Access Denied' - IAM role: 'app-service-role'", "s3_access_denied"),
+        ("JWT token validation failed - token expired at {timestamp} - issued at: {issued_at} - current time: {current_time} - delta: {delta}s", "jwt_expired"),
+        ("Circuit breaker opened for service 'payment-service' - failure rate: 67.3% (67/100 requests) - timeout: 60s - fallback activated", "circuit_breaker_open"),
+        ("Database migration failed - version: 2024.12.15.001 - error executing SQL: duplicate key violation - constraint: 'users_email_key'", "migration_failed"),
+        ("WebSocket connection closed unexpectedly - client_id: {client_id} - reason: 'Ping timeout' - duration: 45s - reconnection attempt 3/5", "websocket_closed"),
+        ("Memory allocation failed in worker process pid={pid} - requested: 512MB - available: 128MB - OOMKiller may intervene", "memory_allocation_failed"),
+        ("ElasticSearch query failed - index: 'logs-2024.12' - error: 'SearchPhaseExecutionException' - shard failures: 3/5 - query: {query}", "elasticsearch_query_failed"),
+        ("Message queue full - queue: 'background-jobs' - current size: 10000/10000 - oldest message age: 3600s - consumers lagging", "queue_full"),
+        ("SSL/TLS handshake failed with upstream service - host: api.partner.com:443 - error: 'certificate has expired' - expiry date: {expiry_date}", "tls_handshake_failed")
     ]
 
-    STACK_TRACES = [
-        """Traceback (most recent call last):
-  File "app/services/database.py", line 45, in execute_query
-    result = await conn.execute(query)
-  File "lib/asyncpg/connection.py", line 123, in execute
-    raise TimeoutError("Query timeout")
-asyncpg.exceptions.QueryTimeout: timeout after 5000ms""",
-        """Traceback (most recent call last):
-  File "app/api/payment.py", line 78, in process_payment
-    response = await payment_gateway.charge(amount)
-  File "lib/payment/client.py", line 56, in charge
-    raise PaymentError("Insufficient funds")
-app.exceptions.PaymentError: Insufficient funds in account""",
-        """Traceback (most recent call last):
-  File "app/services/cache.py", line 34, in get
-    return await redis.get(key)
-  File "lib/redis/client.py", line 89, in get
-    raise ConnectionError("Connection refused")
-redis.exceptions.ConnectionError: Error connecting to Redis"""
-    ]
+    # Detailed stack traces mapped to error types
+    STACK_TRACES = {
+        "db_timeout": """Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/sqlalchemy/engine/base.py", line 1900, in _execute_context
+    self.dialect.do_execute(
+  File "/usr/local/lib/python3.11/site-packages/sqlalchemy/engine/default.py", line 736, in do_execute
+    cursor.execute(statement, parameters)
+  File "/usr/local/lib/python3.11/site-packages/psycopg2/extras.py", line 145, in execute
+    return super().execute(query, vars)
+  File "/usr/local/lib/python3.11/site-packages/psycopg2/extensions.py", line 234, in execute
+    return cursor.execute(query, vars)
+psycopg2.errors.QueryCanceled: canceling statement due to statement timeout
+[SQL: SELECT transactions.id, transactions.user_id, transactions.amount, transactions.status, transactions.created_at FROM transactions WHERE transactions.date > '2024-01-01' ORDER BY transactions.created_at DESC]
+(Background on this error at: https://sqlalche.me/e/14/e3q8)""",
+
+        "auth_failed": """Traceback (most recent call last):
+  File "/app/api/auth.py", line 156, in authenticate_user
+    user = await user_service.get_by_username(username)
+  File "/app/services/user_service.py", line 78, in get_by_username
+    if not bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
+  File "/usr/local/lib/python3.11/site-packages/bcrypt/__init__.py", line 120, in checkpw
+    raise ValueError("Invalid salt")
+bcrypt.InvalidSaltError: Invalid password hash format
+  File "/app/api/auth.py", line 162, in authenticate_user
+    raise AuthenticationError("Invalid credentials")
+app.exceptions.AuthenticationError: Failed to authenticate user: invalid credentials provided""",
+
+        "payment_insufficient_funds": """Traceback (most recent call last):
+  File "/app/api/payment.py", line 234, in process_payment
+    response = await payment_gateway.charge(
+        amount=payment_request.amount,
+        currency=payment_request.currency,
+        source=payment_request.source
+    )
+  File "/app/services/payment_gateway.py", line 145, in charge
+    result = await self._make_api_call('POST', '/v1/charges', payload)
+  File "/app/services/payment_gateway.py", line 89, in _make_api_call
+    raise PaymentGatewayError(error_data['message'], code=error_data['code'])
+app.exceptions.PaymentGatewayError: insufficient_funds - The card has insufficient funds to complete the purchase
+    Requested: $299.99 USD
+    Available: $45.23 USD
+    Card: **** **** **** 4242
+    Decline code: insufficient_funds""",
+
+        "db_lock_timeout": """Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/sqlalchemy/pool/base.py", line 702, in _finalize_fairy
+    fairy._reset(pool)
+  File "/usr/local/lib/python3.11/site-packages/sqlalchemy/pool/base.py", line 943, in _reset
+    pool._dialect.do_rollback(self.dbapi_connection)
+  File "/usr/local/lib/python3.11/site-packages/sqlalchemy/dialects/postgresql/psycopg2.py", line 789, in do_rollback
+    dbapi_connection.rollback()
+psycopg2.errors.LockNotAvailable: could not obtain lock on relation "inventory"
+DETAIL: Process 12845 waits for ShareLock on transaction 2947382; blocked by process 12823.
+HINT: See server log for query details.
+CONTEXT: while updating tuple (243, 67) in relation "inventory"
+[SQL: UPDATE inventory SET quantity = quantity - 1 WHERE product_id = %s AND quantity > 0]""",
+
+        "external_api_error": """Traceback (most recent call last):
+  File "/app/services/external_api_client.py", line 234, in make_request
+    async with session.post(url, json=payload, timeout=timeout) as response:
+  File "/usr/local/lib/python3.11/site-packages/aiohttp/client.py", line 1141, in __aenter__
+    self._resp = await self._coro
+  File "/usr/local/lib/python3.11/site-packages/aiohttp/client.py", line 560, in _request
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 500, message='Internal Server Error', url=URL('https://api.payment-gateway.example.com/v1/charge')
+  File "/app/services/external_api_client.py", line 245, in make_request
+    raise ExternalAPIError(f"API call failed: {response.status}")
+app.exceptions.ExternalAPIError: External API call to payment-gateway.example.com failed - HTTP 500 Internal Server Error""",
+
+        "email_send_failed": """Traceback (most recent call last):
+  File "/app/services/notification_service.py", line 178, in send_email
+    response = await sendgrid_client.send(message)
+  File "/usr/local/lib/python3.11/site-packages/sendgrid/sendgrid.py", line 89, in send
+    return self._make_request(self.client.mail.send.post(request_body=message.get()))
+  File "/usr/local/lib/python3.11/site-packages/python_http_client/client.py", line 234, in http_request
+    raise HTTPError(response.status_code, response.reason, response.content)
+python_http_client.exceptions.UnauthorizedError: HTTP Error 401: Unauthorized
+{
+  "errors": [
+    {
+      "message": "The provided authorization grant is invalid, expired, or revoked",
+      "field": null,
+      "help": "https://sendgrid.com/docs/API_Reference/Web_API_v3/Mail/errors.html#message.authentication"
+    }
+  ]
+}""",
+
+        "file_size_exceeded": """Traceback (most recent call last):
+  File "/app/api/upload.py", line 123, in upload_file
+    file_size_mb = len(file_content) / (1024 * 1024)
+  File "/app/api/upload.py", line 126, in upload_file
+    if file_size_mb > self.MAX_FILE_SIZE_MB:
+  File "/app/api/upload.py", line 127, in upload_file
+    raise FileSizeExceededError(
+app.exceptions.FileSizeExceededError: File upload rejected: size limit exceeded
+    Uploaded: 25.7MB
+    Max allowed: 10MB
+    Filename: user_document_large_file.pdf
+    Content-Type: application/pdf
+    Hint: Consider splitting the file or using chunked upload for files > 10MB""",
+
+        "redis_connection_lost": """Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/redis/connection.py", line 614, in connect
+    sock = self._connect()
+  File "/usr/local/lib/python3.11/site-packages/redis/connection.py", line 654, in _connect
+    raise err
+  File "/usr/local/lib/python3.11/site-packages/redis/connection.py", line 642, in _connect
+    sock.connect(socket_address)
+ConnectionRefusedError: [Errno 111] Connection refused
+During handling of the above exception, another exception occurred:
+Traceback (most recent call last):
+  File "/app/services/cache_service.py", line 89, in get
+    value = await self.redis_client.get(key)
+  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/client.py", line 1234, in get
+    return await self.execute_command('GET', name)
+  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/client.py", line 567, in execute_command
+    conn = await self.connection_pool.get_connection(command_name)
+  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/connection.py", line 245, in get_connection
+    await connection.connect()
+redis.exceptions.ConnectionError: Error connecting to Redis (redis-prod-cluster.internal:6379). Connection refused.""",
+
+        "db_lock_failed": """Traceback (most recent call last):
+  File "/app/services/inventory_service.py", line 234, in reserve_inventory
+    async with self.db.begin():
+        result = await self.db.execute(
+            text("SELECT * FROM inventory WHERE product_id = :product_id FOR UPDATE NOWAIT"),
+            {"product_id": product_id}
+        )
+  File "/usr/local/lib/python3.11/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 567, in execute
+    result = await self._connection.execute(statement, parameters)
+sqlalchemy.exc.OperationalError: (asyncpg.exceptions.LockNotAvailableError) could not obtain lock on row in relation "inventory"
+DETAIL: Process 12845 tried to lock row but found it already locked by process 12823.
+CONTEXT: SQL statement "UPDATE inventory SET reserved_quantity = reserved_quantity + 1 WHERE product_id = $1"
+[SQL: SELECT * FROM inventory WHERE product_id = %(product_id)s FOR UPDATE NOWAIT]
+[parameters: {'product_id': 'prod_8f7a3b2c'}]
+(Background on this error at: https://sqlalche.me/e/14/e3q8)""",
+
+        "rate_limit_exceeded": """Traceback (most recent call last):
+  File "/app/middleware/rate_limiter.py", line 145, in __call__
+    await self._check_rate_limit(request)
+  File "/app/middleware/rate_limiter.py", line 178, in _check_rate_limit
+    current_count = await self.redis.incr(rate_limit_key)
+  File "/app/middleware/rate_limiter.py", line 185, in _check_rate_limit
+    if current_count > self.max_requests:
+  File "/app/middleware/rate_limiter.py", line 186, in _check_rate_limit
+    raise RateLimitExceededError(
+app.exceptions.RateLimitExceededError: Rate limit exceeded for API key
+    Key: api_key_prod_8f7a3b2c4d5e6f7a
+    Current: 1001/1000 requests
+    Window: 60s
+    Reset in: 23s
+    Client IP: 203.0.113.42
+    Hint: Consider implementing exponential backoff or upgrading to higher tier""",
+
+        "kafka_rebalance_failed": """Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/confluent_kafka/consumer.py", line 234, in subscribe
+    self._subscribe_impl(topics, on_assign, on_revoke)
+  File "/usr/local/lib/python3.11/site-packages/confluent_kafka/consumer.py", line 456, in _subscribe_impl
+    raise KafkaException(kafka_error)
+confluent_kafka.KafkaException: KafkaError{code=COORDINATOR_NOT_AVAILABLE,val=15,str="Group coordinator not available: broker may be down or network issues"}
+  File "/app/consumers/order_consumer.py", line 89, in start_consuming
+    self.consumer.subscribe(['order-events'], on_assign=self.on_partition_assigned)
+  File "/app/consumers/order_consumer.py", line 93, in start_consuming
+    raise ConsumerError("Failed to subscribe to Kafka topic")
+app.exceptions.ConsumerError: Kafka consumer group rebalancing failed - topic: 'order-events' - retrying in 5s""",
+
+        "s3_access_denied": """Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/botocore/endpoint.py", line 281, in _do_get_response
+    http_response = self._send(request)
+  File "/usr/local/lib/python3.11/site-packages/botocore/endpoint.py", line 377, in _send
+    return self.http_session.send(request)
+botocore.exceptions.ClientError: An error occurred (AccessDenied) when calling the PutObject operation: Access Denied
+  File "/app/services/storage_service.py", line 156, in upload_to_s3
+    response = await s3_client.put_object(
+        Bucket='prod-uploads',
+        Key=file_key,
+        Body=file_content
+    )
+  File "/app/services/storage_service.py", line 163, in upload_to_s3
+    raise StorageError(f"S3 upload failed: {e}")
+app.exceptions.StorageError: S3 bucket operation failed - operation: PutObject - bucket: 'prod-uploads' - IAM role: 'app-service-role'
+Hint: Check IAM policy permissions for s3:PutObject action""",
+
+        "jwt_expired": """Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/jose/jwt.py", line 234, in decode
+    payload = self._decode_complete(token, key, algorithms, options, audience, issuer, subject)
+  File "/usr/local/lib/python3.11/site-packages/jose/jwt.py", line 267, in _decode_complete
+    self._validate_claims(payload, options, audience, issuer, subject, leeway)
+  File "/usr/local/lib/python3.11/site-packages/jose/jwt.py", line 345, in _validate_claims
+    self._validate_exp(payload, leeway)
+  File "/usr/local/lib/python3.11/site-packages/jose/jwt.py", line 423, in _validate_exp
+    raise ExpiredSignatureError('Signature has expired')
+jose.exceptions.ExpiredSignatureError: Signature has expired at 2024-12-15T14:30:45Z
+  File "/app/middleware/auth_middleware.py", line 123, in verify_token
+    payload = jwt.decode(token, self.secret_key, algorithms=['HS256'])
+  File "/app/middleware/auth_middleware.py", line 128, in verify_token
+    raise AuthenticationError("JWT token expired")
+app.exceptions.AuthenticationError: JWT token validation failed - token expired""",
+
+        "circuit_breaker_open": """Traceback (most recent call last):
+  File "/app/services/payment_service_client.py", line 234, in call_payment_service
+    async with self.circuit_breaker.call():
+        response = await self._make_request(endpoint, payload)
+  File "/usr/local/lib/python3.11/site-packages/circuitbreaker/breaker.py", line 156, in __aenter__
+    if self._state == STATE_OPEN:
+  File "/usr/local/lib/python3.11/site-packages/circuitbreaker/breaker.py", line 159, in __aenter__
+    raise CircuitBreakerError(f"Circuit breaker is OPEN - failure rate: {self.failure_rate}%")
+circuitbreaker.CircuitBreakerError: Circuit breaker is OPEN for service 'payment-service'
+    State: OPEN
+    Failure rate: 67.3% (67/100 requests failed)
+    Threshold: 50%
+    Timeout: 60s
+    Next retry at: 2024-12-15T14:32:15Z
+    Fallback: returning cached response
+Hint: Check payment-service health and logs""",
+
+        "migration_failed": """Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/alembic/runtime/migration.py", line 234, in run_migrations
+    self.execute_migration(step, is_stamp)
+  File "/usr/local/lib/python3.11/site-packages/alembic/runtime/migration.py", line 567, in execute_migration
+    self.environment_context.get_context().execute_migration(revision)
+  File "/usr/local/lib/python3.11/site-packages/sqlalchemy/engine/base.py", line 1900, in execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint "users_email_key"
+DETAIL: Key (email)=(user@example.com) already exists.
+[SQL: ALTER TABLE users ADD CONSTRAINT users_email_key UNIQUE (email)]
+  File "/app/migrations/versions/2024_12_15_001_add_email_unique.py", line 23, in upgrade
+    op.create_unique_constraint('users_email_key', 'users', ['email'])
+alembic.util.exc.CommandError: Database migration failed - version: 2024.12.15.001
+Hint: Check if constraint already exists or if there are duplicate email values in the table"""
+    }
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -396,21 +631,48 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
         # Determine log level based on effective error rate
         is_error = random.random() * 100 < effective_error_rate
 
+        # Variables for error type tracking
+        error_type = None
+        stack_trace = None
+
         if is_error:
             level = random.choice([LogLevel.ERROR, LogLevel.WARN, LogLevel.FATAL])
-            message_template = random.choice(self.ERROR_MESSAGES)
+            # ERROR_MESSAGES is now a list of tuples: (message_template, error_type)
+            message_template, error_type = random.choice(self.ERROR_MESSAGES)
         else:
             level = random.choice([LogLevel.INFO, LogLevel.DEBUG])
             message_template = random.choice(self.INFO_MESSAGES)
 
-        # Select service
+        # Select service and environment
         service = random.choice(self.services)
+        environment = random.choice(self.ENVIRONMENTS)
 
         # Format message with random values
         message = message_template.format(
-            time=random.randint(10, 5000),
+            time=random.randint(1000, 5000),
             key=f"user:{random.randint(1000, 9999)}",
-            user=f"user_{random.randint(1, 1000)}"
+            user=f"user_{random.randint(100, 999)}",
+            amount=random.randint(50, 500),
+            available=random.randint(10, 100),
+            size=random.randint(11, 50),
+            filename=f"{fake.word()}_{fake.word()}.{random.choice(['pdf', 'docx', 'xlsx', 'zip'])}",
+            email=fake.email(),
+            client_id=f"client_{random.randint(1000, 9999)}",
+            tx_id=str(uuid.uuid4())[:8],
+            ip=random.randint(1, 255),
+            timestamp=log_timestamp.isoformat(),
+            issued_at=(log_timestamp.timestamp() - 7200),
+            current_time=log_timestamp.timestamp(),
+            delta=7200 + random.randint(1, 600),
+            pid=random.randint(1000, 9999),
+            query=f"status:error AND service:{service}",
+            expiry_date=(log_timestamp - timedelta(days=random.randint(1, 30))).strftime('%Y-%m-%d'),
+            etag=fake.sha256()[:16],
+            db_latency=random.randint(5, 50),
+            redis_latency=random.randint(1, 10),
+            fingerprint=fake.sha256()[:16],
+            pod=random.randint(1, 5),
+            user_id=random.randint(1000, 9999)
         )
 
         # Generate infrastructure details
@@ -428,7 +690,7 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
         correlation_id = str(uuid.uuid4()) if random.random() > 0.5 else None
 
         # Generate user context
-        user_id = f"user_{random.randint(1, 1000)}" if random.random() > 0.2 else None
+        user_id = f"user_{random.randint(100, 999)}" if random.random() > 0.2 else None
 
         # Generate thread information
         thread_names = ["http-nio-8080-exec-", "async-task-", "kafka-consumer-", "scheduled-"]
@@ -476,17 +738,27 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
         }
         metadata = json.dumps(metadata_dict)
 
+        # Add stack trace for ERROR and FATAL (100% of the time with matching error type)
+        if level in [LogLevel.ERROR, LogLevel.FATAL]:
+            if error_type and error_type in self.STACK_TRACES:
+                # Use the matching stack trace for this error type
+                stack_trace = self.STACK_TRACES[error_type]
+            else:
+                # Fallback to a random stack trace if no match found
+                stack_trace = random.choice(list(self.STACK_TRACES.values()))
+
         # Create enhanced log entry
         log = LogEntry(
             timestamp=log_timestamp.isoformat(),  # Use custom or current timestamp
             service=service,
-            environment="production",
+            environment=environment,  # Randomly selected environment
             host=host,
             pod_name=pod_name,
             container_id=container_id,
             level=level,
             logger_name=logger_name,
             message=message,
+            stack_trace=stack_trace,  # Always present for ERROR/FATAL
             trace_id=trace_id,
             span_id=span_id,
             parent_span_id=parent_span_id,
@@ -500,11 +772,6 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
             source_file=source_file,
             source_line=source_line,
         )
-
-        # Add stack trace for ERROR and FATAL
-        if level in [LogLevel.ERROR, LogLevel.FATAL]:
-            if random.random() > 0.5:
-                log.stack_trace = random.choice(self.STACK_TRACES)
 
         return log
 
@@ -577,8 +844,6 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
     
     async def _historical_generation_loop(self):
         """Historical data generation loop - generates logs sequentially through time"""
-        from datetime import timedelta
-        
         self.logger.info(
             "historical_generation_started",
             start_date=self.historical_start.isoformat(),
