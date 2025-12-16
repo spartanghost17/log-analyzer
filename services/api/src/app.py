@@ -153,8 +153,9 @@ app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(websocket.router, prefix="/api/ws", tags=["websocket"])
 app.include_router(config.router, prefix="/api/config", tags=["config"])
-app.include_router(anomalies.router, prefix="/api/anomalies", tags=["anomalies"])
+# Register zscore BEFORE anomalies to match specific /zscore route before catch-all /{alert_id}
 app.include_router(zscore.router, prefix="/api/anomalies", tags=["anomalies"])
+app.include_router(anomalies.router, prefix="/api/anomalies", tags=["anomalies"])
 
 # Import summary router
 from routers import summary
