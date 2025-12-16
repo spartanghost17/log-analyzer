@@ -304,14 +304,14 @@ export const Topology = () => {
           <div className="bg-[#1a1d24]/95 backdrop-blur border border-gray-700 rounded-lg flex flex-col overflow-hidden shadow-lg">
             <button 
               onClick={handleZoomIn}
-              className="p-2 hover:bg-gray-700 text-gray-400 hover:text-primary transition-colors border-b border-gray-700 group"
+              className="p-2 hover:bg-gray-700 text-gray-400 hover:text-primary transition-colors border-b border-gray-700 group cursor-pointer"
               title="Zoom In"
             >
               <span className="material-symbols-outlined text-lg group-hover:scale-110 transition-transform inline-block">add</span>
             </button>
             <button 
               onClick={handleZoomOut}
-              className="p-2 hover:bg-gray-700 text-gray-400 hover:text-primary transition-colors group"
+              className="p-2 hover:bg-gray-700 text-gray-400 hover:text-primary transition-colors group cursor-pointer"
               title="Zoom Out"
             >
               <span className="material-symbols-outlined text-lg group-hover:scale-110 transition-transform inline-block">remove</span>
@@ -319,7 +319,7 @@ export const Topology = () => {
           </div>
           <button
             onClick={handleFitToScreen}
-            className="bg-[#1a1d24]/95 backdrop-blur border border-gray-700 rounded-lg p-2 hover:bg-gray-700 text-gray-400 hover:text-primary transition-colors shadow-lg group"
+            className="bg-[#1a1d24]/95 backdrop-blur border border-gray-700 rounded-lg p-2 hover:bg-gray-700 text-gray-400 hover:text-primary transition-colors shadow-lg group cursor-pointer"
             title="Reset View"
           >
             <span className="material-symbols-outlined text-lg group-hover:scale-110 transition-transform inline-block">center_focus_strong</span>
