@@ -207,12 +207,18 @@ class QdrantService:
             log_ids_to_enrich = []
             
             for point in data.get("result", []):
+                # Convert Unix timestamp to ISO format string if it's an integer
+                timestamp = point["payload"]["timestamp"]
+                if isinstance(timestamp, int):
+                    from datetime import datetime
+                    timestamp = datetime.fromtimestamp(timestamp).isoformat()
+                
                 result = {
                     "id": point["id"],
                     "score": point["score"],
                     "similarity_score": point["score"],  # Alias for frontend
                     "log_id": point["payload"]["log_id"],
-                    "timestamp": point["payload"]["timestamp"],
+                    "timestamp": timestamp,
                     "service": point["payload"]["service"],
                     "environment": point["payload"]["environment"],
                     "level": point["payload"]["level"],
@@ -235,20 +241,32 @@ class QdrantService:
                     # Create a lookup map
                     logs_map = {log["log_id"]: log for log in full_logs}
                     
-                    # Enrich results
+                    # Enrich results with full log details from ClickHouse
                     for result in results:
                         full_log = logs_map.get(result["log_id"])
                         if full_log:
-                            # Merge ClickHouse data (full message, stack_trace, etc.)
+                            # Merge all ClickHouse fields (complete log data)
                             result.update({
-                                "message": full_log.get("message", result["message"]),  # Full message
+                                "message": full_log.get("message", result["message"]),  # Full message (not truncated)
                                 "stack_trace": full_log.get("stack_trace"),
-                                "http_method": full_log.get("http_method"),
-                                "http_status": full_log.get("http_status"),
-                                "http_path": full_log.get("http_path"),
-                                "response_time_ms": full_log.get("response_time_ms"),
-                                "error_type": full_log.get("error_type"),
-                                "metadata": full_log.get("metadata")
+                                "host": full_log.get("host"),
+                                "pod_name": full_log.get("pod_name"),
+                                "container_id": full_log.get("container_id"),
+                                "logger_name": full_log.get("logger_name"),
+                                "span_id": full_log.get("span_id"),
+                                "parent_span_id": full_log.get("parent_span_id"),
+                                "thread_name": full_log.get("thread_name"),
+                                "correlation_id": full_log.get("correlation_id"),
+                                "labels": full_log.get("labels"),
+                                "metadata": full_log.get("metadata"),  # JSON string with HTTP details, etc.
+                                "is_vectorized": full_log.get("is_vectorized"),
+                                "is_anomaly": full_log.get("is_anomaly"),
+                                "anomaly_score": full_log.get("anomaly_score"),
+                                "source_type": full_log.get("source_type"),
+                                "source_file": full_log.get("source_file"),
+                                "source_line": full_log.get("source_line"),
+                                "ingested_at": full_log.get("ingested_at"),
+                                "processed_at": full_log.get("processed_at")
                             })
                     
                     self.logger.info("semantic_search_enriched", 

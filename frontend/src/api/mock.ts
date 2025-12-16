@@ -380,6 +380,8 @@ const mockSemanticSearchResults: SemanticSearchResult[] = [
   {
     log_id: "log-semantic-001",
     timestamp: randomDate(1),
+    environment: "production",
+    score: 0.98,
     service: "payment-gateway",
     level: "ERROR",
     message:
@@ -390,6 +392,8 @@ const mockSemanticSearchResults: SemanticSearchResult[] = [
   {
     log_id: "log-semantic-002",
     timestamp: randomDate(1),
+    environment: "production",
+    score: 0.92,
     service: "payment-api",
     level: "WARN",
     message:
@@ -400,6 +404,8 @@ const mockSemanticSearchResults: SemanticSearchResult[] = [
   {
     log_id: "log-semantic-003",
     timestamp: randomDate(2),
+    environment: "production",
+    score: 0.89,
     service: "auth-service",
     level: "ERROR",
     message: "AuthService: Token validation failed due to timeout from DB.",

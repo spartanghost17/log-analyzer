@@ -57,10 +57,33 @@ export interface SemanticSearchResult {
   log_id: string;
   timestamp: string;
   service: string;
+  environment: string;
   level: string;
   message: string;
   similarity_score: number;
+  score: number;
   trace_id?: string;
+  user_id?: string;
+  request_id?: string;
+  stack_trace?: string;
+  host?: string;
+  pod_name?: string;
+  container_id?: string;
+  logger_name?: string;
+  span_id?: string;
+  parent_span_id?: string;
+  thread_name?: string;
+  correlation_id?: string;
+  labels?: any;
+  metadata?: string;
+  is_vectorized?: boolean;
+  is_anomaly?: boolean;
+  anomaly_score?: number;
+  source_type?: string;
+  source_file?: string;
+  source_line?: number;
+  ingested_at?: string;
+  processed_at?: string;
 }
 
 export interface SemanticSearchResponse {

@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field
 
 from services.qdrant_service import QdrantService
 from services.cache import CacheService
-
+from settings import get_logger, setup_development_logging
+setup_development_logging()
+logger = get_logger(__name__)
 router = APIRouter()
 
 
@@ -19,19 +21,57 @@ router = APIRouter()
 # ============================================================================
 
 class SearchResult(BaseModel):
-    """Single search result"""
+    """Single search result with full log details"""
+    # Vector search metadata
     id: str
     score: float = Field(..., ge=0, le=1, description="Similarity score (0-1)")
     similarity_score: float = Field(..., ge=0, le=1, description="Similarity score (0-1)")
+    
+    # Core log fields
     log_id: str
-    timestamp: int
+    timestamp: str
     service: str
     environment: str
     level: str
     message: str
+    
+    # Infrastructure
+    host: Optional[str] = None
+    pod_name: Optional[str] = None
+    container_id: Optional[str] = None
+    logger_name: Optional[str] = None
+    
+    # Distributed tracing
     trace_id: Optional[str] = None
+    span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
+    
+    # Context
+    thread_name: Optional[str] = None
     user_id: Optional[str] = None
     request_id: Optional[str] = None
+    correlation_id: Optional[str] = None
+    
+    # Error details
+    stack_trace: Optional[str] = None
+    
+    # Metadata
+    labels: Optional[dict] = None
+    metadata: Optional[str] = None
+    
+    # Processing flags
+    is_vectorized: Optional[bool] = None
+    is_anomaly: Optional[bool] = None
+    anomaly_score: Optional[float] = None
+    
+    # Source information
+    source_type: Optional[str] = None
+    source_file: Optional[str] = None
+    source_line: Optional[int] = None
+    
+    # Timestamps
+    ingested_at: Optional[str] = None
+    processed_at: Optional[str] = None
 
 
 class SemanticSearchResponse(BaseModel):
@@ -130,7 +170,7 @@ async def semantic_search(
             score_threshold=request.score_threshold,
             enrich_with_clickhouse=True  # Fetch full logs from ClickHouse
         )
-        
+        logger.info(f"Results: {results}")
         generation_time = time.time() - start_time
 
         response = SemanticSearchResponse(

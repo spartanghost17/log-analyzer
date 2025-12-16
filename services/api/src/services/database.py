@@ -213,31 +213,42 @@ class DatabaseService:
             log_ids: List of log IDs to fetch
             
         Returns:
-            List of log records with full details
+            List of log records with full details matching the logs table schema
         """
         if not log_ids:
             return []
         
-        # Build query with IN clause
-        # ClickHouse uses tuple syntax for IN with UUIDs
+        # Build query with IN clause matching the actual logs table schema
         query = """
             SELECT 
                 log_id,
                 timestamp,
                 service,
                 environment,
+                host,
+                pod_name,
+                container_id,
                 level,
+                logger_name,
                 message,
+                stack_trace,
                 trace_id,
+                span_id,
+                parent_span_id,
+                thread_name,
                 user_id,
                 request_id,
-                stack_trace,
-                http_method,
-                http_status,
-                http_path,
-                response_time_ms,
-                error_type,
-                metadata
+                correlation_id,
+                labels,
+                metadata,
+                is_vectorized,
+                is_anomaly,
+                anomaly_score,
+                source_type,
+                source_file,
+                source_line,
+                ingested_at,
+                processed_at
             FROM logs
             WHERE log_id IN :log_ids
             ORDER BY timestamp DESC
@@ -259,18 +270,30 @@ class DatabaseService:
                         "timestamp": row[1].isoformat() if row[1] else None,
                         "service": row[2],
                         "environment": row[3],
-                        "level": row[4],
-                        "message": row[5],
-                        "trace_id": row[6],
-                        "user_id": row[7],
-                        "request_id": row[8],
-                        "stack_trace": row[9],
-                        "http_method": row[10],
-                        "http_status": row[11],
-                        "http_path": row[12],
-                        "response_time_ms": row[13],
-                        "error_type": row[14],
-                        "metadata": row[15]
+                        "host": row[4],
+                        "pod_name": row[5],
+                        "container_id": row[6],
+                        "level": row[7],
+                        "logger_name": row[8],
+                        "message": row[9],
+                        "stack_trace": row[10],
+                        "trace_id": str(row[11]) if row[11] else None,
+                        "span_id": row[12],
+                        "parent_span_id": row[13],
+                        "thread_name": row[14],
+                        "user_id": row[15],
+                        "request_id": str(row[16]) if row[16] else None,
+                        "correlation_id": str(row[17]) if row[17] else None,
+                        "labels": row[18],
+                        "metadata": row[19],
+                        "is_vectorized": bool(row[20]) if row[20] is not None else False,
+                        "is_anomaly": bool(row[21]) if row[21] is not None else False,
+                        "anomaly_score": float(row[22]) if row[22] is not None else 0.0,
+                        "source_type": row[23],
+                        "source_file": row[24],
+                        "source_line": int(row[25]) if row[25] is not None else None,
+                        "ingested_at": row[26].isoformat() if row[26] else None,
+                        "processed_at": row[27].isoformat() if row[27] else None
                     })
                 
                 self.logger.info("fetched_logs_by_ids", 
@@ -280,7 +303,7 @@ class DatabaseService:
                 return logs
                 
         except Exception as e:
-            self.logger.error("get_logs_by_ids_failed", error=str(e))
+            self.logger.error("get_logs_by_ids_failed", error=str(e), log_ids_sample=log_ids[:3])
             return []
 
     def get_log_count(
