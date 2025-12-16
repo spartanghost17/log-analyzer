@@ -343,46 +343,49 @@ class DatabaseService:
             hours: int = 24,
             service: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Get hourly log statistics"""
+        """Get hourly log statistics from logs_hourly_agg"""
 
-        query = """
+        # Build query dynamically based on service filter
+        base_query = """
             SELECT 
                 hour,
                 service,
-                total_logs,
-                error_count,
-                warn_count,
-                info_count,
+                sumIf(log_count, level = 'ERROR') as error_count,
+                sumIf(log_count, level = 'WARN') as warn_count,
+                sumIf(log_count, level = 'INFO') as info_count,
+                sum(log_count) as total_logs,
                 uniqMerge(unique_traces) as unique_traces,
                 uniqMerge(unique_users) as unique_users,
-                avgMerge(avg_message_length) as avg_message_length
-            FROM logs_hourly
+                sum(message_length_sum) / sum(message_count) as avg_message_length
+            FROM logs_hourly_agg
             WHERE hour >= now() - INTERVAL :hours HOUR
         """
 
         params = {"hours": hours}
 
+        # Add service filter if provided
         if service:
-            query += " AND service = :service"
+            base_query += " AND service = :service"
             params["service"] = service
 
-        query += " GROUP BY hour, service ORDER BY hour DESC, service"
+        # Add grouping and ordering
+        base_query += " GROUP BY hour, service ORDER BY hour DESC, service"
 
         with self.clickhouse_engine.connect() as conn:
-            result = conn.execute(text(query), params)
+            result = conn.execute(text(base_query), params)
 
             stats = []
             for row in result:
                 stats.append({
                     "hour": row[0].isoformat() if row[0] else None,
                     "service": row[1],
-                    "total_logs": row[2],
-                    "error_count": row[3],
-                    "warn_count": row[4],
-                    "info_count": row[5],
-                    "unique_traces": row[6],
-                    "unique_users": row[7],
-                    "avg_message_length": float(row[8]) if row[8] else 0
+                    "error_count": int(row[2]) if row[2] else 0,
+                    "warn_count": int(row[3]) if row[3] else 0,
+                    "info_count": int(row[4]) if row[4] else 0,
+                    "total_logs": int(row[5]) if row[5] else 0,
+                    "unique_traces": int(row[6]) if row[6] else 0,
+                    "unique_users": int(row[7]) if row[7] else 0,
+                    "avg_message_length": float(row[8]) if row[8] else 0.0
                 })
 
             return stats
