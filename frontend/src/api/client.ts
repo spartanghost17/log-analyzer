@@ -91,6 +91,23 @@ export interface PatternsResponse {
   limit: number;
 }
 
+export interface TopIssue {
+  pattern_hash: string;
+  normalized_message: string;
+  example_message: string;
+  count: number;
+  max_level: string;
+  services: string[];
+  first_seen: string;
+  last_seen: string;
+  sample_log_ids: string[];
+}
+
+export interface AffectedServices {
+  count: number;
+  services: string[];
+}
+
 export interface Report {
   report_id: string;
   report_date: string;
@@ -104,14 +121,14 @@ export interface Report {
   anomalies_detected: number;
   critical_issues: number;
   executive_summary: string;
-  top_issues?: any[];
+  top_issues?: TopIssue[];
   recommendations?: string[];
-  affected_services?: string[];
+  affected_services?: AffectedServices;
   generation_time_seconds: number;
   llm_model_used?: string;
   tokens_used?: number;
   status: string;
-  error_message?: string;
+  error_message?: string | null;
   created_at: string;
 }
 
@@ -207,7 +224,7 @@ export const api = {
     date_to?: string;
     limit?: number;
   }): Promise<ReportsResponse> => {
-    const { data } = await apiClient.get("/api/reports", { params });
+    const { data } = await apiClient.get("/api/reports/", { params });
     return data;
   },
 
@@ -311,8 +328,14 @@ export const api = {
   },
 
   // Anomaly Detection Z-Score Data
-  getAnomalyZScoreData: async (): Promise<any> => {
-    const { data } = await apiClient.get("/api/anomalies/zscore");
+  getAnomalyZScoreData: async (params?: {
+    hours?: number;
+    service?: string;
+    level?: string;
+    threshold?: number;
+    report_start_time?: string;
+  }): Promise<any> => {
+    const { data } = await apiClient.get("/api/anomalies/zscore", { params });
     return data;
   },
 };
@@ -323,13 +346,22 @@ export class LogStreamClient {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
+  private onMessage: (log: LogEntry) => void;
+  private onError: (error: Event) => void;
+  private onOpen: () => void;
+  private onClose: () => void;
 
   constructor(
-    private onMessage: (log: LogEntry) => void,
-    private onError: (error: Event) => void,
-    private onOpen: () => void,
-    private onClose: () => void
-  ) {}
+    onMessage: (log: LogEntry) => void,
+    onError: (error: Event) => void,
+    onOpen: () => void,
+    onClose: () => void
+  ) {
+    this.onMessage = onMessage;
+    this.onError = onError;
+    this.onOpen = onOpen;
+    this.onClose = onClose;
+  }
 
   connect(level?: string) {
     const wsUrl = `ws://localhost:8005/api/ws/logs${

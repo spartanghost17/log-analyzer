@@ -11,6 +11,7 @@ import type {
   ReportsResponse,
   Anomaly,
   AnomaliesResponse,
+  TopIssue,
 } from "./client";
 import type { MetricPoint } from "./types";
 
@@ -217,6 +218,65 @@ const mockErrorPatterns: ErrorPattern[] = [
   },
 ];
 
+// Mock Top Issues (matching actual database structure)
+const mockTopIssues: TopIssue[] = [
+  {
+    pattern_hash: "abc123def456",
+    normalized_message: "Database connection timeout after <NUM>ms",
+    example_message: "Database connection timeout after 5000ms",
+    count: 856,
+    max_level: "ERROR",
+    services: ["api-gateway", "user-service"],
+    first_seen: randomDate(96),
+    last_seen: randomDate(1),
+    sample_log_ids: ["log-001", "log-002", "log-003"],
+  },
+  {
+    pattern_hash: "def456ghi789",
+    normalized_message: "Redis connection failed: <ERROR>",
+    example_message: "Redis connection failed: ECONNREFUSED",
+    count: 542,
+    max_level: "FATAL",
+    services: ["auth-service", "api-gateway"],
+    first_seen: randomDate(72),
+    last_seen: randomDate(2),
+    sample_log_ids: ["log-004", "log-005"],
+  },
+  {
+    pattern_hash: "ghi789jkl012",
+    normalized_message: "Invalid authentication token for user <USER_ID>",
+    example_message: "Invalid authentication token for user user_12345",
+    count: 234,
+    max_level: "ERROR",
+    services: ["auth-service"],
+    first_seen: randomDate(96),
+    last_seen: randomDate(1),
+    sample_log_ids: ["log-006", "log-007"],
+  },
+  {
+    pattern_hash: "jkl012mno345",
+    normalized_message: "Payment processing failed: insufficient funds",
+    example_message: "Payment processing failed: insufficient funds",
+    count: 187,
+    max_level: "ERROR",
+    services: ["payment-service"],
+    first_seen: randomDate(48),
+    last_seen: randomDate(3),
+    sample_log_ids: ["log-008", "log-009"],
+  },
+  {
+    pattern_hash: "mno345pqr678",
+    normalized_message: "External API returned <NUM> error",
+    example_message: "External API returned 500 error",
+    count: 145,
+    max_level: "WARN",
+    services: ["api-gateway", "notification-service"],
+    first_seen: randomDate(120),
+    last_seen: randomDate(1),
+    sample_log_ids: ["log-010", "log-011"],
+  },
+];
+
 // Mock Reports
 const mockReports: Report[] = [
   {
@@ -233,14 +293,17 @@ const mockReports: Report[] = [
     critical_issues: 5,
     executive_summary:
       "System health is generally good with 99.5% uptime. Detected spike in database connection timeouts affecting api-gateway service between 14:00-15:00. Root cause appears to be connection pool exhaustion under peak load. Recommend increasing connection pool size and implementing circuit breaker pattern.",
-    top_issues: mockErrorPatterns.slice(0, 5),
+    top_issues: mockTopIssues.slice(0, 5),
     recommendations: [
+      "Increase Redis memory allocation",
+      "Restart Service: Auth-Provider",
       "Investigate api-gateway database connection pool settings",
-      "Review recent deployments for configuration changes",
-      "Monitor database server resource utilization",
       "Implement circuit breaker for database connections",
     ],
-    affected_services: ["api-gateway", "user-service", "payment-gateway"],
+    affected_services: {
+      count: 4,
+      services: ["redis", "auth-service", "api-gateway", "postgresql"],
+    },
     generation_time_seconds: 125.3,
     llm_model_used: "deepseek-coder:6.7b",
     tokens_used: 15420,
@@ -262,12 +325,15 @@ const mockReports: Report[] = [
     critical_issues: 3,
     executive_summary:
       "System performed well with minor authentication issues. Rate limiting working as expected to prevent abuse. Overall stability maintained throughout the analysis period.",
-    top_issues: mockErrorPatterns.slice(0, 3),
+    top_issues: mockTopIssues.slice(0, 3),
     recommendations: [
       "Review authentication token expiration policies",
       "Consider implementing token refresh mechanism",
     ],
-    affected_services: ["auth-service", "api-gateway"],
+    affected_services: {
+      count: 2,
+      services: ["auth-service", "api-gateway"],
+    },
     generation_time_seconds: 108.7,
     llm_model_used: "deepseek-coder:6.7b",
     tokens_used: 12350,
@@ -289,20 +355,140 @@ const mockReports: Report[] = [
     critical_issues: 7,
     executive_summary:
       "Elevated error rates detected across multiple services. Payment gateway experienced intermittent connectivity issues. Database performance degraded during peak hours.",
-    top_issues: mockErrorPatterns.slice(0, 4),
+    top_issues: mockTopIssues.slice(0, 4),
     recommendations: [
       "Scale up database resources during peak hours",
       "Investigate payment gateway network connectivity",
       "Review error handling in user-service",
       "Implement retry logic for transient failures",
     ],
-    affected_services: ["payment-gateway", "api-gateway", "user-service", "auth-service"],
-    generation_time_seconds: 142.8,
+    affected_services: {
+      count: 4,
+      services: ["payment-gateway", "api-gateway", "user-service", "auth-service"],
+    },
+    generation_time_seconds: 142.6,
     llm_model_used: "deepseek-coder:6.7b",
-    tokens_used: 18920,
+    tokens_used: 18750,
     status: "completed",
     error_message: null,
     created_at: new Date(Date.now() - 172800000).toISOString(),
+  },
+  {
+    report_id: "550e8400-e29b-41d4-a716-446655440004",
+    report_date: new Date(Date.now() - 3 * 86400000).toISOString().split("T")[0],
+    start_time: new Date(Date.now() - 4 * 86400000).toISOString(),
+    end_time: new Date(Date.now() - 3 * 86400000).toISOString(),
+    total_logs_processed: 378451,
+    error_count: 891,
+    warning_count: 4567,
+    unique_error_patterns: 28,
+    new_error_patterns: 2,
+    anomalies_detected: 0,
+    critical_issues: 0,
+    executive_summary:
+      "System operating normally with low error rates. All services responsive and within expected performance parameters.",
+    top_issues: [],
+    recommendations: [],
+    affected_services: {
+      count: 0,
+      services: [],
+    },
+    generation_time_seconds: 85.2,
+    llm_model_used: "deepseek-coder:6.7b",
+    tokens_used: 8420,
+    status: "completed",
+    error_message: null,
+    created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+  },
+  {
+    report_id: "550e8400-e29b-41d4-a716-446655440005",
+    report_date: new Date(Date.now() - 4 * 86400000).toISOString().split("T")[0],
+    start_time: new Date(Date.now() - 5 * 86400000).toISOString(),
+    end_time: new Date(Date.now() - 4 * 86400000).toISOString(),
+    total_logs_processed: 412893,
+    error_count: 1543,
+    warning_count: 6234,
+    unique_error_patterns: 35,
+    new_error_patterns: 5,
+    anomalies_detected: 1,
+    critical_issues: 1,
+    executive_summary:
+      "Minor authentication service disruption detected at 03:00 UTC. Issue resolved automatically after service restart.",
+    top_issues: mockTopIssues.slice(0, 1),
+    recommendations: [
+      "Monitor auth-service memory usage trends",
+      "Consider implementing health check auto-restart policy",
+    ],
+    affected_services: {
+      count: 1,
+      services: ["auth-service"],
+    },
+    generation_time_seconds: 95.4,
+    llm_model_used: "deepseek-coder:6.7b",
+    tokens_used: 10580,
+    status: "completed",
+    error_message: null,
+    created_at: new Date(Date.now() - 4 * 86400000).toISOString(),
+  },
+  {
+    report_id: "550e8400-e29b-41d4-a716-446655440006",
+    report_date: new Date(Date.now() - 5 * 86400000).toISOString().split("T")[0],
+    start_time: new Date(Date.now() - 6 * 86400000).toISOString(),
+    end_time: new Date(Date.now() - 5 * 86400000).toISOString(),
+    total_logs_processed: 389765,
+    error_count: 723,
+    warning_count: 4012,
+    unique_error_patterns: 24,
+    new_error_patterns: 1,
+    anomalies_detected: 0,
+    critical_issues: 0,
+    executive_summary:
+      "Maintenance window executed successfully. System performance improved after database index optimization.",
+    top_issues: [],
+    recommendations: [
+      "Continue monitoring query performance improvements",
+    ],
+    affected_services: {
+      count: 0,
+      services: [],
+    },
+    generation_time_seconds: 78.9,
+    llm_model_used: "deepseek-coder:6.7b",
+    tokens_used: 7890,
+    status: "completed",
+    error_message: null,
+    created_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+  },
+  {
+    report_id: "550e8400-e29b-41d4-a716-446655440007",
+    report_date: new Date(Date.now() - 6 * 86400000).toISOString().split("T")[0],
+    start_time: new Date(Date.now() - 7 * 86400000).toISOString(),
+    end_time: new Date(Date.now() - 6 * 86400000).toISOString(),
+    total_logs_processed: 445892,
+    error_count: 2789,
+    warning_count: 8934,
+    unique_error_patterns: 48,
+    new_error_patterns: 11,
+    anomalies_detected: 3,
+    critical_issues: 4,
+    executive_summary:
+      "Redis cache cluster experienced memory pressure issues. Multiple evictions detected affecting API response times.",
+    top_issues: mockTopIssues.slice(0, 3),
+    recommendations: [
+      "Increase Redis cluster memory capacity",
+      "Review cache TTL policies",
+      "Implement cache warming strategy",
+    ],
+    affected_services: {
+      count: 3,
+      services: ["redis", "api-gateway", "user-service"],
+    },
+    generation_time_seconds: 118.3,
+    llm_model_used: "deepseek-coder:6.7b",
+    tokens_used: 13240,
+    status: "completed",
+    error_message: null,
+    created_at: new Date(Date.now() - 6 * 86400000).toISOString(),
   },
 ];
 
@@ -388,12 +574,33 @@ export const mockApi = {
   },
 
   // Reports
-  getReports: async (params?: any): Promise<ReportsResponse> => {
+  getReports: async (params?: {
+    limit?: number;
+    date_from?: string;
+    date_to?: string;
+  }): Promise<ReportsResponse> => {
     await new Promise((r) => setTimeout(r, 600));
+    
+    let filteredReports = [...mockReports];
+    
+    // Apply date filtering if provided
+    if (params?.date_from || params?.date_to) {
+      filteredReports = filteredReports.filter((report) => {
+        const reportDate = report.report_date;
+        if (params.date_from && reportDate < params.date_from) return false;
+        if (params.date_to && reportDate > params.date_to) return false;
+        return true;
+      });
+    }
+    
+    // Apply limit
+    const limit = params?.limit || 10;
+    filteredReports = filteredReports.slice(0, limit);
+    
     return {
-      reports: mockReports,
-      total: mockReports.length,
-      limit: params?.limit || 10,
+      reports: filteredReports,
+      total: filteredReports.length,
+      limit,
     };
   },
 
@@ -495,8 +702,23 @@ export const mockApi = {
   },
 
   // Anomaly Detection Z-Score Data
-  getAnomalyZScoreData: async (): Promise<any> => {
+  getAnomalyZScoreData: async (params?: {
+    hours?: number;
+    service?: string;
+    level?: string;
+    threshold?: number;
+    report_start_time?: string;
+  }): Promise<any> => {
     await new Promise((r) => setTimeout(r, 400));
+    
+    // Use report_start_time if provided, otherwise use current time
+    const endTime = params?.report_start_time 
+      ? new Date(params.report_start_time).getTime() 
+      : Date.now();
+    
+    const hours = params?.hours || 24;
+    const threshold = params?.threshold || 1.0;
+    
     // Generate realistic anomaly detection data
     const points = 50;
     const data = Array.from({ length: points }, (_, i) => {
@@ -508,17 +730,22 @@ export const mockApi = {
       } else if (i > 15 && i < 18) {
         value += Math.random() * 1.5 + 0.5; // Minor spike
       }
+      
+      // Calculate timestamp working backwards from endTime
+      const intervalMs = (hours * 60 * 60 * 1000) / points; // Distribute evenly over time range
+      const timestamp = new Date(endTime - (points - i) * intervalMs).toISOString();
+      
       return {
         index: i,
         z_score: value,
-        is_anomaly: Math.abs(value) > 1.0,
-        timestamp: new Date(Date.now() - (50 - i) * 30 * 60 * 1000).toISOString(), // 30 min intervals
+        is_anomaly: Math.abs(value) > threshold,
+        timestamp: timestamp,
       };
     });
     
     return {
       data_points: data,
-      threshold: 1.0,
+      threshold: threshold,
       time_range: {
         start: data[0].timestamp,
         end: data[data.length - 1].timestamp,
