@@ -351,11 +351,27 @@ class DatabaseService:
     async def get_analysis_reports(
             self,
             limit: int = 10,
-            offset: int = 0
+            offset: int = 0,
+            date_from: Optional[str] = None,
+            date_to: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Get LLM analysis reports from PostgreSQL nightly_reports table"""
+        """Get LLM analysis reports from PostgreSQL nightly_reports table with optional date filtering"""
 
-        query = """
+        # Build WHERE clause for date filtering
+        where_clauses = []
+        params: Dict[str, Any] = {"limit": limit, "offset": offset}
+        
+        if date_from:
+            where_clauses.append("report_date >= :date_from")
+            params["date_from"] = date_from
+        
+        if date_to:
+            where_clauses.append("report_date <= :date_to")
+            params["date_to"] = date_to
+        
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        query = f"""
             SELECT 
                 report_id,
                 report_date,
@@ -379,15 +395,13 @@ class DatabaseService:
                 error_message,
                 created_at
             FROM nightly_reports
+            {where_sql}
             ORDER BY report_date DESC
             LIMIT :limit OFFSET :offset
         """
 
         async with self.postgres_engine.connect() as conn:
-            result = await conn.execute(
-                text(query),
-                {"limit": limit, "offset": offset}
-            )
+            result = await conn.execute(text(query), params)
 
             reports = []
             for row in result:
@@ -570,7 +584,7 @@ class DatabaseService:
 
         query = """
             INSERT INTO app_config (config_key, config_value, description, is_encrypted)
-            VALUES (:config_key, :config_value::jsonb, :description, :is_encrypted)
+            VALUES (:config_key, CAST(:config_value AS jsonb), :description, :is_encrypted)
             RETURNING config_id, config_key, config_value, description, is_encrypted, created_at, updated_at
         """
 
@@ -604,7 +618,7 @@ class DatabaseService:
         params = {"config_key": config_key}
 
         if "config_value" in config_data:
-            updates.append("config_value = :config_value::jsonb")
+            updates.append("config_value = CAST(:config_value AS jsonb)")
             params["config_value"] = str(config_data["config_value"])
 
         if "description" in config_data:
@@ -785,7 +799,7 @@ class DatabaseService:
                 :service_name, :description, :team, :owner_email, :repository_url,
                 :enabled, :log_retention_days, :vectorize_logs, :vectorize_levels,
                 :error_rate_threshold, :anomaly_sensitivity, :alert_email,
-                :alert_slack_channel, :alert_on_new_patterns, :tags, :environment_tags::jsonb
+                :alert_slack_channel, :alert_on_new_patterns, :tags, CAST(:environment_tags AS jsonb)
             )
             RETURNING service_id, service_name, description, team, owner_email, repository_url,
                       enabled, log_retention_days, vectorize_logs, vectorize_levels,
@@ -872,7 +886,7 @@ class DatabaseService:
                 params[field] = service_data[field]
 
         if "environment_tags" in service_data:
-            updates.append("environment_tags = :environment_tags::jsonb")
+            updates.append("environment_tags = CAST(:environment_tags AS jsonb)")
             params["environment_tags"] = json.dumps(service_data["environment_tags"]) if service_data["environment_tags"] else None
 
         query = f"""
@@ -1256,3 +1270,106 @@ class DatabaseService:
                 },
                 "avg_confidence": float(row[8]) if row and row[8] else 0.0,
             }
+
+    # ========================================================================
+    # Z-Score Anomaly Detection Queries (ClickHouse)
+    # ========================================================================
+
+    def get_zscore_data(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        level: str,
+        service: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Query hourly log counts with baseline data for Z-score calculation
+        
+        Args:
+            start_time: Start of time range
+            end_time: End of time range
+            level: Log level to analyze
+            service: Optional service filter
+            
+        Returns:
+            List of hourly data points with baselines
+        """
+        
+        # Build WHERE clause
+        where_clauses = [
+            "hour >= toDateTime(:start_time)",
+            "hour <= toDateTime(:end_time)",
+            "level = :level"
+        ]
+        
+        if service:
+            where_clauses.append("service = :service")
+        
+        query = f"""
+            SELECT
+                h.hour,
+                h.service,
+                h.environment,
+                h.level,
+                h.log_count,
+                b.mean_count,
+                b.stddev_count,
+                b.upper_threshold,
+                b.lower_threshold
+            FROM logs_hourly_agg h
+            LEFT JOIN anomaly_baselines b ON (
+                h.service = b.service 
+                AND h.environment = b.environment
+                AND h.level = b.level
+                AND toHour(h.hour) = b.hour_of_day
+                AND toDayOfWeek(h.hour) = b.day_of_week
+            )
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY h.hour ASC
+        """
+        
+        params = {
+            "start_time": start_time.strftime('%Y-%m-%d %H:00:00'),
+            "end_time": end_time.strftime('%Y-%m-%d %H:00:00'),
+            "level": level
+        }
+        
+        if service:
+            params["service"] = service
+        
+        # Execute query
+        with self.clickhouse_engine.connect() as conn:
+            result = conn.execute(text(query), params)
+            
+            data_points = []
+            for row in result:
+                data_points.append({
+                    "hour": row[0],
+                    "service": row[1],
+                    "environment": row[2],
+                    "level": row[3],
+                    "actual_count": int(row[4]),
+                    "baseline_mean": float(row[5]) if row[5] is not None else None,
+                    "baseline_stddev": float(row[6]) if row[6] is not None else None,
+                    "upper_threshold": float(row[7]) if row[7] is not None else None,
+                    "lower_threshold": float(row[8]) if row[8] is not None else None,
+                })
+            
+            return data_points
+
+    def get_available_services_with_baselines(self) -> List[str]:
+        """
+        Get list of services that have anomaly baselines configured in ClickHouse
+        
+        Returns:
+            List of service names
+        """
+        query = """
+            SELECT DISTINCT service
+            FROM anomaly_baselines
+            ORDER BY service
+        """
+        
+        with self.clickhouse_engine.connect() as conn:
+            result = conn.execute(text(query))
+            return [row[0] for row in result]
