@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { useQuery } from '@tantml:parameter>
-import { api, Report } from '../api/client';
+import { useQuery } from '@tanstack/react-query';
+import { api, type Report } from '../api/client';
 import { mockApi } from '../api/mock';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import Chart from 'chart.js/auto';
@@ -312,8 +312,8 @@ export const Reports = () => {
                         {format(reportDate, 'MMM d')}
                       </h3>
                       <p className={`text-xs mt-0.5 ${
-                        reportItem.critical_issues > 0 ? 'text-red-500' :
-                        reportItem.anomalies_detected > 0 ? 'text-yellow-500' :
+                        reportItem.critical_issues > 0 ? 'text-red-400/70' :
+                        reportItem.anomalies_detected > 0 ? 'text-yellow-500/70' :
                         'text-gray-500'
                       }`}>
                         {getReportStatusText(reportItem)}
