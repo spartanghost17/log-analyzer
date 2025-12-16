@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, type Report } from '../api/client';
 import { mockApi } from '../api/mock';
-import { format, subDays, startOfDay, endOfDay } from 'date-fns';
+import { format, subDays, startOfDay } from 'date-fns';
 import Chart from 'chart.js/auto';
 
 // Toggle this to switch between mock and real API
@@ -111,12 +111,37 @@ export const Reports = () => {
   // Initialize Z-Score Anomaly Detection Chart
   useEffect(() => {
     if (chartRef.current && anomalyData) {
-      const ctx = chartRef.current.getContext('2d');
+      // For high refresh rate displays (>100Hz), use desynchronized rendering
+      const refreshRate = window.screen?.availWidth > 2000 ? 60 : 165; // Heuristic
+      const ctx = chartRef.current.getContext('2d', {
+        alpha: true,
+        desynchronized: true, // Better for high refresh rates
+        willReadFrequently: false,
+      });
+      
       if (ctx) {
         // Destroy existing chart instance if it exists
         if (chartInstance.current) {
           chartInstance.current.destroy();
         }
+
+        // Let Chart.js handle canvas sizing automatically
+        // Don't manually scale - this causes issues at high refresh rates
+        const container = chartRef.current.parentElement;
+        if (container) {
+          chartRef.current.style.width = '100%';
+          chartRef.current.style.height = '100%';
+        }
+
+        // Debug: Check display properties
+        console.log('Chart Init - Display Debug:', {
+          devicePixelRatio: window.devicePixelRatio,
+          estimatedRefreshRate: refreshRate,
+          screenWidth: window.screen.width,
+          screenHeight: window.screen.height,
+          containerWidth: container?.clientWidth,
+          containerHeight: container?.clientHeight,
+        });
 
         // Extract data from API response
         const dataPoints = anomalyData.data_points || [];
@@ -198,6 +223,20 @@ export const Reports = () => {
           options: {
             responsive: true,
             maintainAspectRatio: false,
+            devicePixelRatio: window.devicePixelRatio, // Explicit DPR for Chart.js
+            animation: {
+              duration: 750,//1500, // Longer for high refresh rates
+              easing: 'easeInOutCubic', // Smoother easing
+              delay: 0,
+              // Force animation to run
+              onProgress: undefined,
+              onComplete: undefined,
+            },
+            interaction: {
+              mode: 'nearest',
+              axis: 'x',
+              intersect: false,
+            },
             plugins: {
               legend: {
                 display: false,
@@ -243,10 +282,31 @@ export const Reports = () => {
             },
           },
         });
+
+        console.log('Chart created successfully', {
+          animation: chartInstance.current.options.animation,
+          devicePixelRatio: chartInstance.current.options.devicePixelRatio,
+        });
       }
     }
 
+    // Handle window resize with debouncing for high refresh rates
+    let resizeTimeout: ReturnType<typeof setTimeout>;
+    const handleResize = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        if (chartInstance.current) {
+          chartInstance.current.resize();
+          chartInstance.current.update('none'); // Update without animation
+        }
+      }, 100); // Debounce resize events
+    };
+
+    window.addEventListener('resize', handleResize);
+
     return () => {
+      clearTimeout(resizeTimeout);
+      window.removeEventListener('resize', handleResize);
       if (chartInstance.current) {
         chartInstance.current.destroy();
       }
@@ -399,28 +459,56 @@ export const Reports = () => {
                   <span className="material-symbols-outlined text-primary mr-2 text-xl">insights</span>
                   Executive Summary
                 </h2>
-                <div className="prose dark:prose-invert max-w-none text-sm text-gray-600 dark:text-gray-400 leading-relaxed space-y-4">
-                  {report.executive_summary.split('\n\n').map((paragraph, pIdx) => (
-                    <p key={pIdx}>
-                      {paragraph.split('\n').map((line, lIdx) => (
-                        <span key={lIdx}>
-                          {lIdx > 0 && <br />}
-                          {line.split(' ').map((word, wIdx) => {
-                            const highlightWords = ['eviction', 'spike', 'deviations', 'timeout', 'critical', 'database', 'error', 'failure', 'failed'];
-                            const shouldHighlight = highlightWords.some(hw => word.toLowerCase().includes(hw.toLowerCase()));
-                            return shouldHighlight ? (
-                              <span key={wIdx} className="bg-primary/15 text-primary px-0.5 rounded font-medium">
-                                {word}{' '}
+                <div className="relative">
+                  <div className="prose dark:prose-invert max-w-none text-sm text-gray-600 dark:text-gray-400 leading-relaxed max-h-[400px] overflow-hidden">
+                    {(() => {
+                      // Filter out recommendations section from executive summary
+                      const summaryParts = report.executive_summary.split('\n\n');
+                      const filteredParts = summaryParts.filter(part => {
+                        const trimmed = part.trim();
+                        // Filter out recommendation sections and bullet points
+                        return trimmed.length > 0 && 
+                          !trimmed.toLowerCase().includes('recommendation') &&
+                          !trimmed.match(/^[-•*]\s/);
+                      });
+                      
+                      return filteredParts.slice(0, 3).map((paragraph, pIdx) => (
+                        <p key={pIdx} className={pIdx < filteredParts.slice(0, 3).length - 1 ? "mb-3" : "mb-0"}>
+                          {paragraph.split('\n').map((line, lIdx) => {
+                            const trimmedLine = line.trim();
+                            if (!trimmedLine) return null;
+                            
+                            return (
+                              <span key={lIdx}>
+                                {lIdx > 0 && <br />}
+                                {trimmedLine.split(' ').map((word, wIdx) => {
+                                  const highlightWords = ['eviction', 'spike', 'deviations', 'timeout', 'critical', 'database', 'error', 'failure', 'failed', 'fatal'];
+                                  const shouldHighlight = highlightWords.some(hw => word.toLowerCase().includes(hw.toLowerCase()));
+                                  return shouldHighlight ? (
+                                    <span key={wIdx} className="bg-primary/15 text-primary px-0.5 rounded font-medium">
+                                      {word}{' '}
+                                    </span>
+                                  ) : (
+                                    word + ' '
+                                  );
+                                })}
                               </span>
-                            ) : (
-                              word + ' '
                             );
                           })}
-                        </span>
-                      ))}
-                    </p>
-                  ))}
+                        </p>
+                      ));
+                    })()}
+                  </div>
+                  {/* Fade gradient at bottom */}
+                  <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white dark:from-surface-dark to-transparent pointer-events-none"></div>
                 </div>
+                <button 
+                  onClick={() => setShowDetailsModal(true)}
+                  className="mt-3 text-xs text-primary hover:text-primary-hover flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <span>Read full analysis</span>
+                  <span className="material-symbols-outlined text-sm">arrow_forward</span>
+                </button>
 
                 {/* Metrics Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
@@ -455,7 +543,7 @@ export const Reports = () => {
 
               {/* Z-Score Anomaly Detection Chart */}
               <div className="bg-white dark:bg-surface-dark rounded-xl shadow-sm border border-gray-200 dark:border-border-dark p-6">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-2">
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Z-Score Anomaly Detection</h2>
                   <div className="flex items-center space-x-2">
                     <span className="flex items-center text-xs text-gray-500">
@@ -465,6 +553,25 @@ export const Reports = () => {
                       <span className="w-2 h-2 rounded-full bg-gray-600 mr-2"></span> Baseline
                     </span>
                   </div>
+                </div>
+                
+                {/* Time Range Info */}
+                <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-xs">schedule</span>
+                    <span>
+                      {format(new Date(report.start_time), 'MMM d, HH:mm')} - {format(new Date(report.end_time), 'MMM d, HH:mm')}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-gray-100 dark:bg-surface-darker">
+                    <span className="material-symbols-outlined text-xs text-primary">date_range</span>
+                    <span className="font-medium text-gray-700 dark:text-gray-300">
+                      {Math.round((new Date(report.end_time).getTime() - new Date(report.start_time).getTime()) / (1000 * 60 * 60))}h coverage
+                    </span>
+                  </div>
+                  <span className="text-xs">
+                    Generated {format(new Date(report.created_at), 'HH:mm')} UTC
+                  </span>
                 </div>
                 
                 {/* Filter Controls */}
@@ -529,9 +636,16 @@ export const Reports = () => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-8">
                 {/* Recommended Actions */}
                 <div className="bg-white dark:bg-surface-dark rounded-xl shadow-sm border border-gray-200 dark:border-border-dark p-6">
-                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-4">
-                    Recommended Actions
-                  </h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                      Recommended Actions
+                    </h3>
+                    {report.recommendations && report.recommendations.length > 2 && (
+                      <span className="text-xs text-gray-500">
+                        {report.recommendations.length} total
+                      </span>
+                    )}
+                  </div>
                   <ul className="space-y-3">
                     {(report.recommendations || [
                       'Increase Redis memory allocation',
@@ -542,20 +656,31 @@ export const Reports = () => {
                         className="flex items-start p-3 bg-gray-50 dark:bg-surface-darker rounded border border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors cursor-pointer group"
                       >
                         <span className="material-symbols-outlined text-primary text-sm mt-0.5 mr-3">bolt</span>
-                        <div>
-                          <p className="text-sm text-gray-800 dark:text-gray-200 font-medium group-hover:text-primary transition-colors whitespace-pre-line">
-                            {rec}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {idx === 0 ? 'Scaling to 4GB limits eviction risks.' : 'Clear accumulated thread locks.'}
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-800 dark:text-gray-200 font-medium group-hover:text-primary transition-colors">
+                            {rec.split('\n').map((line, lIdx) => (
+                              <span key={lIdx}>
+                                {lIdx > 0 && <br />}
+                                {line}
+                              </span>
+                            ))}
                           </p>
                         </div>
-                        <span className="ml-auto material-symbols-outlined text-gray-400 dark:text-gray-600 text-sm">
+                        <span className="ml-auto material-symbols-outlined text-gray-400 dark:text-gray-600 text-sm flex-shrink-0">
                           chevron_right
                         </span>
                       </li>
                     ))}
                   </ul>
+                  {report.recommendations && report.recommendations.length > 2 && (
+                    <button
+                      onClick={() => setShowDetailsModal(true)}
+                      className="mt-4 w-full py-2 text-xs text-primary hover:text-primary-hover bg-gray-50 dark:bg-surface-darker hover:bg-gray-100 dark:hover:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 transition-colors cursor-pointer flex items-center justify-center gap-1"
+                    >
+                      <span>View all {report.recommendations.length} recommendations</span>
+                      <span className="material-symbols-outlined text-sm">arrow_forward</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Root Cause Probability */}
@@ -631,6 +756,36 @@ export const Reports = () => {
 
             {/* Modal Content - Scrollable */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Executive Summary - Full Text */}
+              <div className="bg-gray-50 dark:bg-surface-darker rounded-xl p-6 border border-gray-200 dark:border-gray-800">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary">insights</span>
+                  Executive Summary
+                </h3>
+                <div className="prose dark:prose-invert max-w-none text-sm text-gray-600 dark:text-gray-400 leading-relaxed space-y-4">
+                  {(() => {
+                    // Filter out recommendations from executive summary
+                    const summaryParts = report?.executive_summary.split('\n\n') || [];
+                    const filteredParts = summaryParts.filter(part => 
+                      !part.toLowerCase().includes('recommendation') && 
+                      !part.toLowerCase().startsWith('- ') &&
+                      part.trim().length > 0
+                    );
+                    
+                    return filteredParts.map((paragraph, pIdx) => (
+                      <p key={pIdx} className="mb-2">
+                        {paragraph.split('\n').map((line, lIdx) => (
+                          <span key={lIdx}>
+                            {lIdx > 0 && <br />}
+                            {line}
+                          </span>
+                        ))}
+                      </p>
+                    ));
+                  })()}
+                </div>
+              </div>
+
               {/* Report Statistics */}
               <div className="bg-gray-50 dark:bg-surface-darker rounded-xl p-6 border border-gray-200 dark:border-gray-800">
                 <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -768,18 +923,29 @@ export const Reports = () => {
                 </div>
               )}
 
-              {/* Recommendations */}
+              {/* All Recommendations */}
               {report?.recommendations && report.recommendations.length > 0 && (
                 <div className="bg-gray-50 dark:bg-surface-darker rounded-xl p-6 border border-gray-200 dark:border-gray-800">
                   <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-4 flex items-center gap-2">
                     <span className="material-symbols-outlined text-primary">lightbulb</span>
-                    AI Recommendations
+                    All AI Recommendations ({report.recommendations.length})
                   </h3>
                   <div className="space-y-3">
                     {report.recommendations.map((rec, idx) => (
-                      <div key={idx} className="flex items-start gap-3 p-4 bg-white dark:bg-surface-dark rounded-lg border border-gray-200 dark:border-gray-700 hover:border-primary dark:hover:border-primary transition-colors">
-                        <span className="material-symbols-outlined text-primary text-lg flex-shrink-0 mt-0.5">bolt</span>
-                        <p className="text-sm text-gray-700 dark:text-gray-300 flex-1 whitespace-pre-line">{rec}</p>
+                      <div key={idx} className="flex items-start gap-3 p-4 bg-white dark:bg-surface-dark rounded-lg border border-gray-200 dark:border-gray-700">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                            {rec.split('\n').map((line, lIdx) => (
+                              <span key={lIdx}>
+                                {lIdx > 0 && <br />}
+                                {line}
+                              </span>
+                            ))}
+                          </p>
+                        </div>
                       </div>
                     ))}
                   </div>

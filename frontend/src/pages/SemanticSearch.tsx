@@ -193,18 +193,32 @@ export const SemanticSearch = () => {
 
                   <div className="flex-1 mb-6 relative">
                     <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
-                    <div className="pl-4 space-y-2">
+                    <div className="pl-4 space-y-3">
                       {clusterResults.slice(0, 5).map((result, i) => (
-                        <p
+                        <div
                           key={result.log_id}
-                          className="text-xs font-mono text-gray-500 dark:text-gray-400 line-clamp-1"
-                          style={{ opacity: 1 - (i * 0.2) }}
+                          className="text-[11px] font-mono text-gray-600 dark:text-gray-300 leading-relaxed"
+                          style={{ opacity: 1 - (i * 0.15) }}
                         >
-                          timestamp="{format(new Date(result.timestamp), 'yyyy-MM-dd HH:mm')}" level={result.level} msg="{result.message.substring(0, 40)}..."
-                        </p>
+                          <div className="flex items-start gap-2 flex-wrap">
+                            <span className="text-gray-400 dark:text-gray-500 shrink-0">timestamp=</span>
+                            <span className="text-primary/80">"{format(new Date(result.timestamp), 'yyyy-MM-dd HH:mm')}"</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${
+                              result.level === 'ERROR' ? 'bg-red-500/20 text-red-400' :
+                              result.level === 'WARN' ? 'bg-yellow-500/20 text-yellow-400' :
+                              result.level === 'INFO' ? 'bg-blue-500/20 text-blue-400' :
+                              'bg-purple-500/20 text-purple-400'
+                            }`}>
+                              {result.level}
+                            </span>
+                          </div>
+                          <div className="mt-1 line-clamp-2 text-gray-700 dark:text-gray-300">
+                            msg="{result.message.substring(0, 80)}..."
+                          </div>
+                        </div>
                       ))}
                     </div>
-                    <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white dark:from-surface-dark to-transparent"></div>
+                    <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white dark:from-surface-dark to-transparent"></div>
                   </div>
 
                   <button className="w-full bg-primary hover:bg-primary-hover text-black font-semibold text-sm py-2.5 rounded-lg transition flex items-center justify-center gap-2 group-hover:scale-[1.02] active:scale-100 cursor-pointer">

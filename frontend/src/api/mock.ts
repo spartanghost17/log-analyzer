@@ -373,123 +373,6 @@ const mockReports: Report[] = [
     error_message: null,
     created_at: new Date(Date.now() - 172800000).toISOString(),
   },
-  {
-    report_id: "550e8400-e29b-41d4-a716-446655440004",
-    report_date: new Date(Date.now() - 3 * 86400000).toISOString().split("T")[0],
-    start_time: new Date(Date.now() - 4 * 86400000).toISOString(),
-    end_time: new Date(Date.now() - 3 * 86400000).toISOString(),
-    total_logs_processed: 378451,
-    error_count: 891,
-    warning_count: 4567,
-    unique_error_patterns: 28,
-    new_error_patterns: 2,
-    anomalies_detected: 0,
-    critical_issues: 0,
-    executive_summary:
-      "System operating normally with low error rates. All services responsive and within expected performance parameters.",
-    top_issues: [],
-    recommendations: [],
-    affected_services: {
-      count: 0,
-      services: [],
-    },
-    generation_time_seconds: 85.2,
-    llm_model_used: "deepseek-coder:6.7b",
-    tokens_used: 8420,
-    status: "completed",
-    error_message: null,
-    created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
-  },
-  {
-    report_id: "550e8400-e29b-41d4-a716-446655440005",
-    report_date: new Date(Date.now() - 4 * 86400000).toISOString().split("T")[0],
-    start_time: new Date(Date.now() - 5 * 86400000).toISOString(),
-    end_time: new Date(Date.now() - 4 * 86400000).toISOString(),
-    total_logs_processed: 412893,
-    error_count: 1543,
-    warning_count: 6234,
-    unique_error_patterns: 35,
-    new_error_patterns: 5,
-    anomalies_detected: 1,
-    critical_issues: 1,
-    executive_summary:
-      "Minor authentication service disruption detected at 03:00 UTC. Issue resolved automatically after service restart.",
-    top_issues: mockTopIssues.slice(0, 1),
-    recommendations: [
-      "Monitor auth-service memory usage trends",
-      "Consider implementing health check auto-restart policy",
-    ],
-    affected_services: {
-      count: 1,
-      services: ["auth-service"],
-    },
-    generation_time_seconds: 95.4,
-    llm_model_used: "deepseek-coder:6.7b",
-    tokens_used: 10580,
-    status: "completed",
-    error_message: null,
-    created_at: new Date(Date.now() - 4 * 86400000).toISOString(),
-  },
-  {
-    report_id: "550e8400-e29b-41d4-a716-446655440006",
-    report_date: new Date(Date.now() - 5 * 86400000).toISOString().split("T")[0],
-    start_time: new Date(Date.now() - 6 * 86400000).toISOString(),
-    end_time: new Date(Date.now() - 5 * 86400000).toISOString(),
-    total_logs_processed: 389765,
-    error_count: 723,
-    warning_count: 4012,
-    unique_error_patterns: 24,
-    new_error_patterns: 1,
-    anomalies_detected: 0,
-    critical_issues: 0,
-    executive_summary:
-      "Maintenance window executed successfully. System performance improved after database index optimization.",
-    top_issues: [],
-    recommendations: [
-      "Continue monitoring query performance improvements",
-    ],
-    affected_services: {
-      count: 0,
-      services: [],
-    },
-    generation_time_seconds: 78.9,
-    llm_model_used: "deepseek-coder:6.7b",
-    tokens_used: 7890,
-    status: "completed",
-    error_message: null,
-    created_at: new Date(Date.now() - 5 * 86400000).toISOString(),
-  },
-  {
-    report_id: "550e8400-e29b-41d4-a716-446655440007",
-    report_date: new Date(Date.now() - 6 * 86400000).toISOString().split("T")[0],
-    start_time: new Date(Date.now() - 7 * 86400000).toISOString(),
-    end_time: new Date(Date.now() - 6 * 86400000).toISOString(),
-    total_logs_processed: 445892,
-    error_count: 2789,
-    warning_count: 8934,
-    unique_error_patterns: 48,
-    new_error_patterns: 11,
-    anomalies_detected: 3,
-    critical_issues: 4,
-    executive_summary:
-      "Redis cache cluster experienced memory pressure issues. Multiple evictions detected affecting API response times.",
-    top_issues: mockTopIssues.slice(0, 3),
-    recommendations: [
-      "Increase Redis cluster memory capacity",
-      "Review cache TTL policies",
-      "Implement cache warming strategy",
-    ],
-    affected_services: {
-      count: 3,
-      services: ["redis", "api-gateway", "user-service"],
-    },
-    generation_time_seconds: 118.3,
-    llm_model_used: "deepseek-coder:6.7b",
-    tokens_used: 13240,
-    status: "completed",
-    error_message: null,
-    created_at: new Date(Date.now() - 6 * 86400000).toISOString(),
-  },
 ];
 
 // Mock Semantic Search Results
@@ -574,33 +457,12 @@ export const mockApi = {
   },
 
   // Reports
-  getReports: async (params?: {
-    limit?: number;
-    date_from?: string;
-    date_to?: string;
-  }): Promise<ReportsResponse> => {
+  getReports: async (params?: any): Promise<ReportsResponse> => {
     await new Promise((r) => setTimeout(r, 600));
-    
-    let filteredReports = [...mockReports];
-    
-    // Apply date filtering if provided
-    if (params?.date_from || params?.date_to) {
-      filteredReports = filteredReports.filter((report) => {
-        const reportDate = report.report_date;
-        if (params.date_from && reportDate < params.date_from) return false;
-        if (params.date_to && reportDate > params.date_to) return false;
-        return true;
-      });
-    }
-    
-    // Apply limit
-    const limit = params?.limit || 10;
-    filteredReports = filteredReports.slice(0, limit);
-    
     return {
-      reports: filteredReports,
-      total: filteredReports.length,
-      limit,
+      reports: mockReports,
+      total: mockReports.length,
+      limit: params?.limit || 10,
     };
   },
 

@@ -351,27 +351,11 @@ class DatabaseService:
     async def get_analysis_reports(
             self,
             limit: int = 10,
-            offset: int = 0,
-            date_from: Optional[str] = None,
-            date_to: Optional[str] = None
+            offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get LLM analysis reports from PostgreSQL nightly_reports table with optional date filtering"""
+        """Get LLM analysis reports from PostgreSQL nightly_reports table"""
 
-        # Build WHERE clause for date filtering
-        where_clauses = []
-        params: Dict[str, Any] = {"limit": limit, "offset": offset}
-        
-        if date_from:
-            where_clauses.append("report_date >= :date_from")
-            params["date_from"] = date_from
-        
-        if date_to:
-            where_clauses.append("report_date <= :date_to")
-            params["date_to"] = date_to
-        
-        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-
-        query = f"""
+        query = """
             SELECT 
                 report_id,
                 report_date,
@@ -395,13 +379,15 @@ class DatabaseService:
                 error_message,
                 created_at
             FROM nightly_reports
-            {where_sql}
             ORDER BY report_date DESC
             LIMIT :limit OFFSET :offset
         """
 
         async with self.postgres_engine.connect() as conn:
-            result = await conn.execute(text(query), params)
+            result = await conn.execute(
+                text(query),
+                {"limit": limit, "offset": offset}
+            )
 
             reports = []
             for row in result:

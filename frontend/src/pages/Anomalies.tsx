@@ -7,7 +7,7 @@ import { mockApi } from '../api/mock';
 import { format, subHours, addHours } from 'date-fns';
 
 // Toggle this to switch between mock and real API
-const USE_MOCK_API = true;
+const USE_MOCK_API = false;
 
 export const Anomalies = () => {
   const navigate = useNavigate();
