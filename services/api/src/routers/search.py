@@ -22,6 +22,7 @@ class SearchResult(BaseModel):
     """Single search result"""
     id: str
     score: float = Field(..., ge=0, le=1, description="Similarity score (0-1)")
+    similarity_score: float = Field(..., ge=0, le=1, description="Similarity score (0-1)")
     log_id: str
     timestamp: int
     service: str
@@ -38,6 +39,7 @@ class SemanticSearchResponse(BaseModel):
     query: str
     results: List[SearchResult]
     count: int
+    generation_time_seconds: float = Field(0.0, description="Time taken to generate results")
 
 
 class SimilarLogsResponse(BaseModel):
@@ -67,36 +69,47 @@ def get_cache() -> CacheService:
 # Endpoints
 # ============================================================================
 
-@router.get("/semantic", response_model=SemanticSearchResponse)
+class SemanticSearchRequest(BaseModel):
+    """Request model for semantic search"""
+    query: str = Field(..., min_length=1, max_length=500, description="Search query text")
+    top_k: int = Field(20, ge=1, le=100, description="Maximum number of results")
+    level: Optional[str] = Field(None, description="Filter by log level")
+    service: Optional[str] = Field(None, description="Filter by service name")
+    score_threshold: float = Field(0.7, ge=0.0, le=1.0, description="Minimum similarity score")
+
+
+@router.post("/semantic", response_model=SemanticSearchResponse)
 async def semantic_search(
-        query: str = Query(..., min_length=1, max_length=500),
-        limit: int = Query(10, ge=1, le=100),
-        service: Optional[str] = Query(None),
-        level: Optional[str] = Query(None),
-        score_threshold: float = Query(0.7, ge=0.0, le=1.0),
+        request: SemanticSearchRequest,
         qdrant: QdrantService = Depends(get_qdrant),
         cache: CacheService = Depends(get_cache)
 ):
     """
-    Semantic search for similar log messages
+    Semantic search for similar log messages using AI embeddings
+    
+    This endpoint:
+    1. Converts your search query into a vector embedding using Jina AI
+    2. Searches Qdrant vector database for semantically similar logs
+    3. Enriches results with full log details from ClickHouse
+    4. Returns ranked results with similarity scores
 
-    - **query**: Search query (natural language)
-    - **limit**: Maximum number of results (1-100)
-    - **service**: Filter by service name
-    - **level**: Filter by log level
-    - **score_threshold**: Minimum similarity score (0-1)
+    - **query**: Natural language search query (e.g., "authentication failures")
+    - **top_k**: Maximum number of results to return (1-100)
+    - **service**: Optional filter by service name
+    - **level**: Optional filter by log level (ERROR, WARN, INFO, etc.)
+    - **score_threshold**: Minimum similarity score threshold (0-1)
 
-    Returns logs semantically similar to the query, ranked by similarity score.
+    Returns logs semantically similar to your query, ranked by relevance.
     """
 
     # Generate cache key
     cache_key = cache.cache_key(
         "search:semantic",
-        query=query,
-        limit=limit,
-        service=service,
-        level=level,
-        threshold=score_threshold
+        query=request.query,
+        limit=request.top_k,
+        service=request.service,
+        level=request.level,
+        threshold=request.score_threshold
     )
 
     # Try cache first
@@ -106,18 +119,25 @@ async def semantic_search(
 
     # Perform search
     try:
+        import time
+        start_time = time.time()
+        
         results = await qdrant.semantic_search(
-            query=query,
-            limit=limit,
-            service=service,
-            level=level,
-            score_threshold=score_threshold
+            query=request.query,
+            limit=request.top_k,
+            service=request.service,
+            level=request.level,
+            score_threshold=request.score_threshold,
+            enrich_with_clickhouse=True  # Fetch full logs from ClickHouse
         )
+        
+        generation_time = time.time() - start_time
 
         response = SemanticSearchResponse(
-            query=query,
+            query=request.query,
             results=[SearchResult(**r) for r in results],
-            count=len(results)
+            count=len(results),
+            generation_time_seconds=round(generation_time, 3)
         )
 
         # Cache for 10 minutes

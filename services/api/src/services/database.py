@@ -202,6 +202,87 @@ class DatabaseService:
 
             return logs
 
+    async def get_logs_by_ids(
+            self,
+            log_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch logs from ClickHouse by their log_ids
+        
+        Args:
+            log_ids: List of log IDs to fetch
+            
+        Returns:
+            List of log records with full details
+        """
+        if not log_ids:
+            return []
+        
+        # Build query with IN clause
+        # ClickHouse uses tuple syntax for IN with UUIDs
+        query = """
+            SELECT 
+                log_id,
+                timestamp,
+                service,
+                environment,
+                level,
+                message,
+                trace_id,
+                user_id,
+                request_id,
+                stack_trace,
+                http_method,
+                http_status,
+                http_path,
+                response_time_ms,
+                error_type,
+                metadata
+            FROM logs
+            WHERE log_id IN :log_ids
+            ORDER BY timestamp DESC
+        """
+        
+        # Execute query
+        try:
+            with self.clickhouse_engine.connect() as conn:
+                # Convert log_ids list to tuple for ClickHouse IN clause
+                result = conn.execute(
+                    text(query),
+                    {"log_ids": tuple(log_ids)}
+                )
+                
+                logs = []
+                for row in result:
+                    logs.append({
+                        "log_id": str(row[0]),
+                        "timestamp": row[1].isoformat() if row[1] else None,
+                        "service": row[2],
+                        "environment": row[3],
+                        "level": row[4],
+                        "message": row[5],
+                        "trace_id": row[6],
+                        "user_id": row[7],
+                        "request_id": row[8],
+                        "stack_trace": row[9],
+                        "http_method": row[10],
+                        "http_status": row[11],
+                        "http_path": row[12],
+                        "response_time_ms": row[13],
+                        "error_type": row[14],
+                        "metadata": row[15]
+                    })
+                
+                self.logger.info("fetched_logs_by_ids", 
+                                requested_count=len(log_ids),
+                                found_count=len(logs))
+                
+                return logs
+                
+        except Exception as e:
+            self.logger.error("get_logs_by_ids_failed", error=str(e))
+            return []
+
     def get_log_count(
             self,
             service: Optional[str] = None,

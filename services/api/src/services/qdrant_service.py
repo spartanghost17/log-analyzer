@@ -143,7 +143,8 @@ class QdrantService:
         limit: int = 10,
         service: Optional[str] = None,
         level: Optional[str] = None,
-        score_threshold: float = 0.7
+        score_threshold: float = 0.7,
+        enrich_with_clickhouse: bool = True
     ) -> List[Dict[str, Any]]:
         """
         Perform semantic search on log embeddings
@@ -154,6 +155,7 @@ class QdrantService:
             service: Filter by service name
             level: Filter by log level
             score_threshold: Minimum similarity score (0-1)
+            enrich_with_clickhouse: Whether to fetch full log details from ClickHouse
 
         Returns:
             List of similar logs with scores
@@ -200,12 +202,15 @@ class QdrantService:
             response.raise_for_status()
             data = response.json()
 
-            # Format results
+            # Format results from Qdrant
             results = []
+            log_ids_to_enrich = []
+            
             for point in data.get("result", []):
-                results.append({
+                result = {
                     "id": point["id"],
                     "score": point["score"],
+                    "similarity_score": point["score"],  # Alias for frontend
                     "log_id": point["payload"]["log_id"],
                     "timestamp": point["payload"]["timestamp"],
                     "service": point["payload"]["service"],
@@ -215,7 +220,44 @@ class QdrantService:
                     "trace_id": point["payload"].get("trace_id"),
                     "user_id": point["payload"].get("user_id"),
                     "request_id": point["payload"].get("request_id")
-                })
+                }
+                results.append(result)
+                log_ids_to_enrich.append(point["payload"]["log_id"])
+
+            # Enrich with full log data from ClickHouse if requested
+            if enrich_with_clickhouse and log_ids_to_enrich:
+                try:
+                    from app import db_service
+                    
+                    # Fetch full logs from ClickHouse
+                    full_logs = await db_service.get_logs_by_ids(log_ids_to_enrich)
+                    
+                    # Create a lookup map
+                    logs_map = {log["log_id"]: log for log in full_logs}
+                    
+                    # Enrich results
+                    for result in results:
+                        full_log = logs_map.get(result["log_id"])
+                        if full_log:
+                            # Merge ClickHouse data (full message, stack_trace, etc.)
+                            result.update({
+                                "message": full_log.get("message", result["message"]),  # Full message
+                                "stack_trace": full_log.get("stack_trace"),
+                                "http_method": full_log.get("http_method"),
+                                "http_status": full_log.get("http_status"),
+                                "http_path": full_log.get("http_path"),
+                                "response_time_ms": full_log.get("response_time_ms"),
+                                "error_type": full_log.get("error_type"),
+                                "metadata": full_log.get("metadata")
+                            })
+                    
+                    self.logger.info("semantic_search_enriched", 
+                                    query_preview=query[:50], 
+                                    result_count=len(results),
+                                    enriched_count=len(full_logs))
+                except Exception as e:
+                    self.logger.warning("clickhouse_enrichment_failed", error=str(e))
+                    # Continue with Qdrant data only
 
             return results
 
@@ -295,6 +337,7 @@ class QdrantService:
                     results.append({
                         "id": point["id"],
                         "score": point["score"],
+                        "similarity_score": point["score"],  # Alias for frontend
                         "log_id": point["payload"]["log_id"],
                         "timestamp": point["payload"]["timestamp"],
                         "service": point["payload"]["service"],
