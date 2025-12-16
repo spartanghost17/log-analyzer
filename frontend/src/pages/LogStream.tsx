@@ -236,13 +236,13 @@ export const LogStream = () => {
           <div className="mb-6">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Time Range</label>
             <div className="flex items-center gap-2 mb-2">
-              <button className="flex-1 py-1 px-2 text-xs rounded bg-primary text-gray-900 font-medium border border-primary">
+              <button className="flex-1 py-1 px-2 text-xs rounded bg-primary text-gray-900 font-medium border border-primary cursor-pointer">
                 1h
               </button>
-              <button className="flex-1 py-1 px-2 text-xs rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-transparent hover:border-gray-300 dark:hover:border-gray-600">
+              <button className="flex-1 py-1 px-2 text-xs rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 cursor-pointer">
                 24h
               </button>
-              <button className="flex-1 py-1 px-2 text-xs rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-transparent hover:border-gray-300 dark:hover:border-gray-600">
+              <button className="flex-1 py-1 px-2 text-xs rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 cursor-pointer">
                 7d
               </button>
             </div>
@@ -271,7 +271,7 @@ export const LogStream = () => {
             <p className="text-indigo-200 text-xs mb-3 relative z-10">
               {fatalCount + errorCount + warnCount} anomalies detected in the last hour.
             </p>
-            <button className="w-full bg-white/10 hover:bg-white/20 text-white text-xs py-1.5 rounded border border-white/10 transition-colors">
+            <button className="w-full bg-white/10 hover:bg-white/20 text-white text-xs py-1.5 rounded border border-white/10 transition-colors cursor-pointer">
               Analyze
             </button>
           </div>
@@ -299,7 +299,7 @@ export const LogStream = () => {
           </div>
           <button
             onClick={() => setIsPaused(!isPaused)}
-            className="bg-primary hover:bg-yellow-400 text-gray-900 font-medium py-2 px-4 rounded-lg flex items-center gap-2 shadow-sm shadow-primary/20 transition-all"
+            className="bg-primary hover:bg-yellow-400 text-gray-900 font-medium py-2 px-4 rounded-lg flex items-center gap-2 shadow-sm shadow-primary/20 transition-all cursor-pointer"
           >
             <span className="material-icons-outlined text-sm">{isPaused ? 'play_arrow' : 'pause'}</span>
             {isPaused ? 'Run' : 'Pause'}
@@ -309,7 +309,7 @@ export const LogStream = () => {
               setLogs([]);
               setSearchQuery("");
             }}
-            className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 py-2 px-4 rounded-lg flex items-center gap-2 shadow-sm transition-all"
+            className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 py-2 px-4 rounded-lg flex items-center gap-2 shadow-sm transition-all cursor-pointer"
           >
             <span className="material-icons-outlined text-sm">save_alt</span>
             Export
@@ -401,10 +401,10 @@ export const LogStream = () => {
               <span className="font-medium text-gray-900 dark:text-white">{filteredLogs.length}</span> results
             </div>
             <div className="flex gap-2">
-              <button className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-surface-dark hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50" disabled>
+              <button className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-surface-dark hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed" disabled>
                 Previous
               </button>
-              <button className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-surface-dark hover:bg-gray-50 dark:hover:bg-gray-700">
+              <button className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-surface-dark hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
                 Next
               </button>
             </div>

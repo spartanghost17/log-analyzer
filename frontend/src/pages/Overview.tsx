@@ -46,7 +46,7 @@ export const Overview = () => {
         </div>
         <div className="flex items-center gap-3">
           <div className="flex bg-gray-100 dark:bg-surface-dark rounded-lg p-1 border border-gray-200 dark:border-gray-700">
-            <button className="px-3 py-1 text-xs font-medium rounded text-gray-900 dark:text-white bg-white dark:bg-gray-700 shadow-sm">
+            <button className="px-3 py-1 text-xs font-medium rounded text-gray-900 dark:text-white bg-white dark:bg-gray-700 shadow-sm cursor-pointer">
               Overview
             </button>
             <button className="px-3 py-1 text-xs font-medium rounded text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">

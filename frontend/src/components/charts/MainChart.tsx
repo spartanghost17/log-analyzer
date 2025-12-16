@@ -18,7 +18,7 @@ interface MainChartProps {
 export const MainChart = ({ data, loading }: MainChartProps) => {
   if (loading) {
     return (
-      <div className="relative h-[400px] w-full flex items-center justify-center rounded-xl border border-primary-alt/20 bg-gradient-to-br from-primary-alt/5 to-transparent bg-panel-light">
+      <div className="relative h-full w-full flex items-center justify-center rounded-xl border border-gray-800/30 bg-gradient-to-br from-primary-alt/5 to-transparent bg-panel-light">
         <div className="flex flex-col items-center gap-3">
           <div className="relative">
             <span className="material-symbols-outlined animate-spin text-primary-alt text-[40px]">
@@ -33,12 +33,12 @@ export const MainChart = ({ data, loading }: MainChartProps) => {
   }
 
   return (
-    <div className="rounded-xl border border-primary-alt/20 bg-gradient-to-br from-primary-alt/5 to-transparent bg-panel-light p-6 relative overflow-hidden group hover:border-primary-alt/30 transition-all duration-300 hover:shadow-lg hover:shadow-primary-alt/10">
+    <div className="rounded-xl border border-gray-800/30 bg-gradient-to-br from-primary-alt/5 to-transparent bg-panel-light p-4 relative overflow-hidden group hover:border-gray-700/40 transition-all duration-300 h-full flex flex-col">
       {/* Decorative background elements */}
       <div className="absolute top-0 right-0 w-64 h-64 bg-primary-alt/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
       <div className="absolute bottom-0 left-0 w-48 h-48 bg-primary/5 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none"></div>
       
-      <div className="mb-6 flex items-center justify-between relative z-10">
+      <div className="mb-4 flex items-center justify-between relative z-10 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-alt/10 text-primary-alt">
             <span className="material-symbols-outlined text-[20px]">
@@ -55,14 +55,14 @@ export const MainChart = ({ data, loading }: MainChartProps) => {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary-alt/10 border border-primary-alt/20">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary-alt animate-pulse shadow-[0_0_6px_rgba(14,165,233,0.8)]"></span>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary-alt/10 border border-gray-800/40">
+            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_rgba(34,211,238,1),0_0_16px_rgba(34,211,238,0.8),0_0_24px_rgba(34,211,238,0.4)]"></span>
             <span className="text-xs font-bold text-primary-alt uppercase tracking-wide">Live</span>
           </div>
         </div>
       </div>
 
-      <div className="h-[300px] w-full relative z-10">
+      <div className="flex-1 w-full relative z-10 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data}>
             <defs>

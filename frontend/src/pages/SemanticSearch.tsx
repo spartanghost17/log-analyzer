@@ -110,7 +110,7 @@ export const SemanticSearch = () => {
           <div className="relative bg-surface-light dark:bg-[#15161C] rounded-xl border border-gray-200 dark:border-primary/30 shadow-2xl flex items-center p-1">
             <span className="pl-4 material-icons-outlined text-primary">auto_awesome</span>
             <input
-              className="w-full bg-transparent border-none focus:ring-0 text-lg py-4 px-4 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+              className="w-full bg-transparent border-none focus:ring-0 focus:outline-none text-lg py-4 px-4 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
               placeholder="Ask Synaps: Find logs similar to trace ID 123..."
               type="text"
               value={searchQuery}
@@ -120,7 +120,7 @@ export const SemanticSearch = () => {
             <button
               onClick={handleSearch}
               disabled={searchMutation.isPending}
-              className="hidden md:flex items-center gap-2 bg-primary hover:bg-primary-hover text-black font-medium px-6 py-2.5 rounded-lg mr-1 transition-transform active:scale-95 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="hidden md:flex items-center gap-2 bg-primary hover:bg-primary-hover text-black font-medium px-6 py-2.5 rounded-lg mr-1 transition-transform active:scale-95 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               <span>Analyze</span>
               <span className="material-icons-outlined text-sm">arrow_forward</span>
@@ -207,7 +207,7 @@ export const SemanticSearch = () => {
                     <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white dark:from-surface-dark to-transparent"></div>
                   </div>
 
-                  <button className="w-full bg-primary hover:bg-primary-hover text-black font-semibold text-sm py-2.5 rounded-lg transition flex items-center justify-center gap-2 group-hover:scale-[1.02] active:scale-100">
+                  <button className="w-full bg-primary hover:bg-primary-hover text-black font-semibold text-sm py-2.5 rounded-lg transition flex items-center justify-center gap-2 group-hover:scale-[1.02] active:scale-100 cursor-pointer">
                     <span className="material-icons-outlined text-lg">psychology</span>
                     Analyze with LLM
                   </button>
