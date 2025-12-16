@@ -61,6 +61,17 @@ class Settings(BaseSettings):
     error_rate_percentage: int = Field(default=5, ge=0, le=100, validation_alias="ERROR_RATE_PERCENTAGE")
     services: str = Field(default="api-gateway,user-service,payment-service,notification-service,auth-service", validation_alias="SERVICES")
 
+    # Historical data generation settings
+    historical_mode: bool = Field(default=False, validation_alias="HISTORICAL_MODE")
+    historical_start_date: str = Field(default="01/12/2024", validation_alias="HISTORICAL_START_DATE")  # DD/MM/YYYY
+    historical_end_date: str = Field(default="15/12/2024", validation_alias="HISTORICAL_END_DATE")      # DD/MM/YYYY
+    
+    # Anomaly injection settings (format: "day_of_week-hour,day_of_week-hour" e.g., "1-3,1-15,5-21")
+    # day_of_week: 1=Monday, 7=Sunday; hour: 0-23
+    anomaly_schedule: str = Field(default="", validation_alias="ANOMALY_SCHEDULE")
+    anomaly_multiplier_min: float = Field(default=3.0, ge=1.0, le=20.0, validation_alias="ANOMALY_MULTIPLIER_MIN")
+    anomaly_multiplier_max: float = Field(default=8.0, ge=1.0, le=20.0, validation_alias="ANOMALY_MULTIPLIER_MAX")
+
     # API settings
     api_host: str = Field(default="0.0.0.0", validation_alias="API_HOST")
     api_port: int = Field(default=8000, validation_alias="API_PORT")
@@ -144,6 +155,8 @@ class HealthResponse(BaseModel):
     logs_sent: int
     current_rate: int
     uptime_seconds: float
+    historical_mode: bool
+    anomaly_hours_configured: int
 
 
 class GeneratorStats(BaseModel):
@@ -214,6 +227,22 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
         # Parse services
         self.services = [s.strip() for s in self.settings.services.split(',')]
 
+        # Parse anomaly schedule
+        self.anomaly_hours = self._parse_anomaly_schedule(self.settings.anomaly_schedule)
+        
+        # Parse historical dates
+        self.historical_start = None
+        self.historical_end = None
+        if self.settings.historical_mode:
+            self.historical_start = self._parse_date(self.settings.historical_start_date)
+            self.historical_end = self._parse_date(self.settings.historical_end_date)
+            self.logger.info(
+                "historical_mode_enabled",
+                start_date=self.historical_start.isoformat(),
+                end_date=self.historical_end.isoformat(),
+                anomaly_schedule=self.anomaly_hours
+            )
+
         # Kafka producer
         self.producer: Optional[Producer] = None
 
@@ -227,6 +256,92 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
         # Current settings
         self.current_rate = self.settings.log_rate_per_second
         self.current_error_rate = self.settings.error_rate_percentage
+        
+        # Historical generation state
+        self.current_historical_time = self.historical_start if self.settings.historical_mode else None
+
+    def _parse_date(self, date_str: str) -> datetime:
+        """Parse date string in DD/MM/YYYY format"""
+        from datetime import datetime
+        return datetime.strptime(date_str, "%d/%m/%Y").replace(tzinfo=timezone.utc)
+    
+    def _parse_anomaly_schedule(self, schedule: str) -> set:
+        """
+        Parse anomaly schedule string into set of (day_of_week, hour) tuples
+        Format: "1-3,1-15,5-21" means Monday-3AM, Monday-3PM, Friday-9PM
+        day_of_week: 1=Monday, 7=Sunday (ISO format)
+        hour: 0-23
+        """
+        if not schedule or not schedule.strip():
+            return set()
+        
+        anomaly_hours = set()
+        parts = schedule.split(',')
+        
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            
+            try:
+                day_str, hour_str = part.split('-')
+                day_of_week = int(day_str)
+                hour = int(hour_str)
+                
+                if 1 <= day_of_week <= 7 and 0 <= hour <= 23:
+                    anomaly_hours.add((day_of_week, hour))
+                else:
+                    self.logger.warning(
+                        "invalid_anomaly_schedule_entry",
+                        entry=part,
+                        reason="day_of_week must be 1-7, hour must be 0-23"
+                    )
+            except (ValueError, IndexError) as e:
+                self.logger.warning(
+                    "invalid_anomaly_schedule_entry",
+                    entry=part,
+                    error=str(e)
+                )
+        
+        return anomaly_hours
+    
+    def _is_anomaly_hour(self, dt: datetime) -> bool:
+        """Check if given datetime falls in anomaly schedule"""
+        if not self.anomaly_hours:
+            return False
+        
+        # Python datetime: Monday=0, Sunday=6
+        # ISO format: Monday=1, Sunday=7
+        day_of_week = dt.isoweekday()  # 1-7 (Monday-Sunday)
+        hour = dt.hour  # 0-23
+        
+        return (day_of_week, hour) in self.anomaly_hours
+    
+    def _get_effective_error_rate(self, dt: datetime) -> int:
+        """Get error rate for given datetime, with anomaly multiplier if applicable"""
+        base_rate = self.current_error_rate
+        
+        if self._is_anomaly_hour(dt):
+            multiplier = random.uniform(
+                self.settings.anomaly_multiplier_min,
+                self.settings.anomaly_multiplier_max
+            )
+            anomaly_rate = int(base_rate * multiplier)
+            # Cap at 100%
+            anomaly_rate = min(anomaly_rate, 100)
+            
+            self.logger.debug(
+                "anomaly_hour_detected",
+                day_of_week=dt.isoweekday(),
+                hour=dt.hour,
+                base_rate=base_rate,
+                multiplier=f"{multiplier:.2f}",
+                anomaly_rate=anomaly_rate
+            )
+            
+            return anomaly_rate
+        
+        return base_rate
 
     def setup_kafka(self):
         """Setup Kafka producer"""
@@ -265,10 +380,21 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
             self.total_sent += 1
             LOGS_SENT.inc()
 
-    def generate_log(self) -> LogEntry:
-        """Generate a single enhanced log entry with realistic data"""
-        # Determine log level based on error rate
-        is_error = random.random() * 100 < self.current_error_rate
+    def generate_log(self, custom_timestamp: Optional[datetime] = None) -> LogEntry:
+        """
+        Generate a single enhanced log entry with realistic data
+        
+        Args:
+            custom_timestamp: Optional custom timestamp for historical data generation
+        """
+        # Use custom timestamp or current time
+        log_timestamp = custom_timestamp or datetime.now(timezone.utc)
+        
+        # Get effective error rate (may be multiplied if anomaly hour)
+        effective_error_rate = self._get_effective_error_rate(log_timestamp)
+        
+        # Determine log level based on effective error rate
+        is_error = random.random() * 100 < effective_error_rate
 
         if is_error:
             level = random.choice([LogLevel.ERROR, LogLevel.WARN, LogLevel.FATAL])
@@ -352,6 +478,7 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
 
         # Create enhanced log entry
         log = LogEntry(
+            timestamp=log_timestamp.isoformat(),  # Use custom or current timestamp
             service=service,
             environment="production",
             host=host,
@@ -406,10 +533,24 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
             LOGS_FAILED.inc()
 
     async def generation_loop(self):
-        """Main log generation loop"""
+        """Main log generation loop (real-time or historical)"""
         self.running = True
+        
+        if self.settings.historical_mode:
+            await self._historical_generation_loop()
+        else:
+            await self._realtime_generation_loop()
+        
+        # Flush remaining messages
+        if self.producer:
+            self.producer.flush()
+
+        self.logger.info("generation_stopped")
+    
+    async def _realtime_generation_loop(self):
+        """Real-time log generation loop"""
         self.logger.info(
-            "generation_started",
+            "realtime_generation_started",
             rate=self.current_rate,
             error_rate=self.current_error_rate
         )
@@ -419,7 +560,7 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
                 # Calculate delay between logs
                 delay = 1.0 / self.current_rate
 
-                # Generate and produce log
+                # Generate and produce log (with current timestamp)
                 log = self.generate_log()
                 self.produce_log(log)
 
@@ -433,12 +574,72 @@ redis.exceptions.ConnectionError: Error connecting to Redis"""
             except Exception as e:
                 self.logger.error("generation_loop_error", error=str(e))
                 await asyncio.sleep(1)
+    
+    async def _historical_generation_loop(self):
+        """Historical data generation loop - generates logs sequentially through time"""
+        from datetime import timedelta
+        
+        self.logger.info(
+            "historical_generation_started",
+            start_date=self.historical_start.isoformat(),
+            end_date=self.historical_end.isoformat(),
+            rate=self.current_rate,
+            base_error_rate=self.current_error_rate,
+            anomaly_hours=len(self.anomaly_hours)
+        )
+        
+        current_time = self.historical_start
+        time_increment = timedelta(seconds=1.0 / self.current_rate)
+        logs_in_current_hour = 0
+        current_hour = current_time.replace(minute=0, second=0, microsecond=0)
+        
+        while self.running and current_time <= self.historical_end:
+            try:
+                # Generate log with historical timestamp
+                log = self.generate_log(custom_timestamp=current_time)
+                self.produce_log(log)
+                
+                # Track progress
+                logs_in_current_hour += 1
+                
+                # Move time forward
+                current_time += time_increment
+                
+                # Log progress every hour
+                new_hour = current_time.replace(minute=0, second=0, microsecond=0)
+                if new_hour != current_hour:
+                    is_anomaly = self._is_anomaly_hour(current_hour)
+                    self.logger.info(
+                        "historical_hour_completed",
+                        hour=current_hour.isoformat(),
+                        logs_generated=logs_in_current_hour,
+                        is_anomaly_hour=is_anomaly,
+                        progress_pct=f"{((current_time - self.historical_start).total_seconds() / (self.historical_end - self.historical_start).total_seconds() * 100):.1f}%"
+                    )
+                    current_hour = new_hour
+                    logs_in_current_hour = 0
+                
+                # Small delay every 100 logs to prevent overwhelming Kafka
+                if self.total_generated % 100 == 0:
+                    await asyncio.sleep(0.01)
+                
+                # Update metrics
+                GENERATION_RATE.set(self.current_rate)
+                ERROR_RATE.set(self.current_error_rate)
 
-        # Flush remaining messages
-        if self.producer:
-            self.producer.flush()
-
-        self.logger.info("generation_stopped")
+            except Exception as e:
+                self.logger.error("historical_generation_error", error=str(e))
+                await asyncio.sleep(1)
+        
+        self.logger.info(
+            "historical_generation_completed",
+            total_logs=self.total_generated,
+            start_date=self.historical_start.isoformat(),
+            end_date=self.historical_end.isoformat()
+        )
+        
+        # Stop after historical generation completes
+        self.running = False
 
     def start(self):
         """Start log generation"""
@@ -552,7 +753,9 @@ async def health_check():
         logs_generated=generator_service.total_generated,
         logs_sent=generator_service.total_sent,
         current_rate=generator_service.current_rate,
-        uptime_seconds=uptime
+        uptime_seconds=uptime,
+        historical_mode=generator_service.settings.historical_mode,
+        anomaly_hours_configured=len(generator_service.anomaly_hours)
     )
 
 
