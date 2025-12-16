@@ -70,6 +70,14 @@ export const MainChart = ({ data, loading }: MainChartProps) => {
                 <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} />
                 <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
               </linearGradient>
+              <linearGradient id="colorErrors" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4} />
+                <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="colorWarns" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#fde047" stopOpacity={0.4} />
+                <stop offset="95%" stopColor="#fde047" stopOpacity={0} />
+              </linearGradient>
             </defs>
             <CartesianGrid
               strokeDasharray="3 3"
@@ -91,7 +99,7 @@ export const MainChart = ({ data, loading }: MainChartProps) => {
               fontSize={11}
               tickLine={false}
               axisLine={false}
-              tickFormatter={(value) => `${value / 1000}k`}
+              tickFormatter={(value) => `${value > 1000 ? (value / 1000).toFixed(1) + 'k' : value}`}
               fontWeight={500}
             />
             <Tooltip
@@ -105,7 +113,6 @@ export const MainChart = ({ data, loading }: MainChartProps) => {
                 boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
               }}
               itemStyle={{ 
-                color: "#0ea5e9",
                 fontWeight: 600,
                 fontSize: "0.875rem",
               }}
@@ -124,10 +131,29 @@ export const MainChart = ({ data, loading }: MainChartProps) => {
             <Area
               type="monotone"
               dataKey="value"
+              name="Total Logs"
               stroke="#0ea5e9"
-              strokeWidth={2.5}
+              strokeWidth={2}
               fillOpacity={1}
               fill="url(#colorValue)"
+            />
+            <Area
+              type="monotone"
+              dataKey="errors"
+              name="Errors"
+              stroke="#ef4444"
+              strokeWidth={2}
+              fillOpacity={1}
+              fill="url(#colorErrors)"
+            />
+            <Area
+              type="monotone"
+              dataKey="warns"
+              name="Warnings"
+              stroke="#fde047"
+              strokeWidth={2}
+              fillOpacity={1}
+              fill="url(#colorWarns)"
             />
           </AreaChart>
         </ResponsiveContainer>
