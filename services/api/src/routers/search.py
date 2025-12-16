@@ -3,7 +3,7 @@ Search Router
 Endpoints for semantic search using Qdrant vector database
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any, Union
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
@@ -89,6 +89,39 @@ class SimilarLogsResponse(BaseModel):
     count: int
 
 
+class ClusterMetadata(BaseModel):
+    """Metadata for a single cluster"""
+    environment: str
+    service: str
+    level: str
+    avg_similarity: float
+    log_count: int
+    time_range: Dict[str, str]  # earliest and latest timestamp
+    dominant_message_pattern: str  # Most common message pattern
+
+
+class LogCluster(BaseModel):
+    """A cluster of semantically similar logs"""
+    cluster_id: str  # Generated ID: {env}_{service}_{level}_{idx}
+    metadata: ClusterMetadata
+    logs: List[SearchResult]
+
+
+class EnvironmentGroup(BaseModel):
+    """Logs grouped by environment"""
+    environment: str
+    total_logs: int
+    clusters: List[LogCluster]
+
+
+class ClusteredSearchResponse(BaseModel):
+    """Response with clustered semantic search results"""
+    query: str
+    total_results: int
+    environment_groups: List[EnvironmentGroup]
+    generation_time_seconds: float
+
+
 # ============================================================================
 # Dependency Injection
 # ============================================================================
@@ -118,9 +151,10 @@ class SemanticSearchRequest(BaseModel):
     score_threshold: float = Field(0.7, ge=0.0, le=1.0, description="Minimum similarity score")
 
 
-@router.post("/semantic", response_model=SemanticSearchResponse)
+@router.post("/semantic", response_model=Union[SemanticSearchResponse, ClusteredSearchResponse])
 async def semantic_search(
         request: SemanticSearchRequest,
+        return_clusters: bool = Query(False, description="Return results as clusters grouped by environment"),
         qdrant: QdrantService = Depends(get_qdrant),
         cache: CacheService = Depends(get_cache)
 ):
@@ -132,12 +166,14 @@ async def semantic_search(
     2. Searches Qdrant vector database for semantically similar logs
     3. Enriches results with full log details from ClickHouse
     4. Returns ranked results with similarity scores
+    5. Optionally clusters results by environment, service, level, and pattern
 
     - **query**: Natural language search query (e.g., "authentication failures")
     - **top_k**: Maximum number of results to return (1-100)
     - **service**: Optional filter by service name
     - **level**: Optional filter by log level (ERROR, WARN, INFO, etc.)
     - **score_threshold**: Minimum similarity score threshold (0-1)
+    - **return_clusters**: If true, returns hierarchically clustered results
 
     Returns logs semantically similar to your query, ranked by relevance.
     """
@@ -149,7 +185,8 @@ async def semantic_search(
         limit=request.top_k,
         service=request.service,
         level=request.level,
-        threshold=request.score_threshold
+        threshold=request.score_threshold,
+        clusters=return_clusters
     )
 
     # Try cache first
@@ -162,28 +199,46 @@ async def semantic_search(
         import time
         start_time = time.time()
         
-        results = await qdrant.semantic_search(
-            query=request.query,
-            limit=request.top_k,
-            service=request.service,
-            level=request.level,
-            score_threshold=request.score_threshold,
-            enrich_with_clickhouse=True  # Fetch full logs from ClickHouse
-        )
-        logger.info(f"Results: {results}")
-        generation_time = time.time() - start_time
+        if return_clusters:
+            # Return clustered results
+            clustered_results = await qdrant.semantic_search_clustered(
+                query=request.query,
+                top_k=request.top_k,
+                service=request.service,
+                level=request.level,
+                score_threshold=request.score_threshold
+            )
+            
+            response = ClusteredSearchResponse(**clustered_results)
+            
+            # Cache for 10 minutes
+            await cache.set(cache_key, response.model_dump(), ttl=600)
+            
+            return response
+        else:
+            # Return flat results
+            results = await qdrant.semantic_search(
+                query=request.query,
+                limit=request.top_k,
+                service=request.service,
+                level=request.level,
+                score_threshold=request.score_threshold,
+                enrich_with_clickhouse=True  # Fetch full logs from ClickHouse
+            )
+            logger.info(f"Results: {results}")
+            generation_time = time.time() - start_time
 
-        response = SemanticSearchResponse(
-            query=request.query,
-            results=[SearchResult(**r) for r in results],
-            count=len(results),
-            generation_time_seconds=round(generation_time, 3)
-        )
+            response = SemanticSearchResponse(
+                query=request.query,
+                results=[SearchResult(**r) for r in results],
+                count=len(results),
+                generation_time_seconds=round(generation_time, 3)
+            )
 
-        # Cache for 10 minutes
-        await cache.set(cache_key, response.model_dump(), ttl=600)
+            # Cache for 10 minutes
+            await cache.set(cache_key, response.model_dump(), ttl=600)
 
-        return response
+            return response
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")

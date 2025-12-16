@@ -30,8 +30,9 @@ class SystemMetrics(BaseModel):
 class ThroughputDataPoint(BaseModel):
     """Single throughput data point for time-series chart"""
     time: str
-    value: int
+    value: int  # Total logs
     errors: int = 0
+    warns: int = 0
 
 
 # ============================================================================
@@ -181,7 +182,8 @@ async def get_throughput_data(
             ThroughputDataPoint(
                 time=time_label,
                 value=stat.get("total_logs", 0),
-                errors=stat.get("error_count", 0)
+                errors=stat.get("error_count", 0),
+                warns=stat.get("warn_count", 0)
             )
         )
 

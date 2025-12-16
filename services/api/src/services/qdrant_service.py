@@ -4,6 +4,9 @@ Handles vector search operations with Qdrant
 """
 
 import hashlib
+import re
+import time
+from collections import Counter
 from typing import List, Dict, Any, Optional
 
 import httpx
@@ -67,6 +70,78 @@ class QdrantService:
             await self.http_client.aclose()
 
         self.logger.info("qdrant_disconnected")
+
+    def _normalize_message(self, message: str) -> str:
+        """
+        Normalize log message for pattern detection
+        Enhanced version matching llm-analyzer's normalize_error_message
+        
+        This parameterizes variable data (UUIDs, numbers, IPs, etc.) to enable
+        pattern-based clustering of similar log messages.
+        
+        IMPORTANT: This must match llm-analyzer's normalization exactly for
+        consistent pattern clustering across services.
+        """
+        # 1. Remove UUIDs (before other number patterns)
+        message = re.sub(
+            r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+            '<UUID>', message, flags=re.IGNORECASE
+        )
+        
+        # 2. Remove full timestamps (ISO format, etc.)
+        message = re.sub(
+            r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?',
+            '<TIMESTAMP>', message
+        )
+        
+        # 3. Remove IP addresses (before general numbers)
+        message = re.sub(
+            r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b',
+            '<IP>', message
+        )
+        
+        # 4. Remove hex strings
+        message = re.sub(r'\b0x[0-9a-fA-F]+\b', '<HEX>', message)
+        
+        # 5. Normalize numbers with units (e.g., 45s, 100ms, 2GB, 5.5MB)
+        message = re.sub(
+            r'\b\d+(?:\.\d+)?(?:ms|s|m|h|d|MB|GB|KB|TB|%)\b',
+            '<NUM_UNIT>', message, flags=re.IGNORECASE
+        )
+        
+        # 6. Normalize IDs with numbers (e.g., client_8111, user_id_42, session-123)
+        # Match: word + separator + digits
+        message = re.sub(
+            r'\b([a-zA-Z_]+[_-])(\d+)\b',
+            r'\1<NUM>', message
+        )
+        
+        # 7. Normalize port numbers (e.g., :8080, :5432)
+        message = re.sub(r':(\d{2,5})\b', r':<PORT>', message)
+        
+        # 8. Normalize version numbers (e.g., v1.2.3, version 2.0)
+        message = re.sub(
+            r'\bv?\d+\.\d+(?:\.\d+)?(?:\.\d+)?\b',
+            '<VERSION>', message, flags=re.IGNORECASE
+        )
+        
+        # 9. Normalize memory addresses (e.g., 0x7ffe1234abcd)
+        message = re.sub(r'\b0x[0-9a-fA-F]{8,}\b', '<ADDR>', message)
+        
+        # 10. Normalize standalone numbers (catch-all for remaining numbers)
+        # This should come LAST to avoid conflicts
+        message = re.sub(r'\b\d+\b', '<NUM>', message)
+        
+        # 11. Normalize file paths (optional - can help cluster file-related errors)
+        message = re.sub(
+            r'[/\\][\w\-./\\]+\.(py|java|js|ts|go|rb|php|cpp|c|h)',
+            '<FILE>', message, flags=re.IGNORECASE
+        )
+        
+        # 12. Normalize whitespace (multiple spaces/tabs → single space)
+        message = ' '.join(message.split())
+        
+        return message
 
     async def check_health(self) -> bool:
         """Check Qdrant health"""
@@ -471,3 +546,149 @@ class QdrantService:
         except Exception as e:
             self.logger.error("cluster_similar_logs_failed", error=str(e))
             return []
+
+    async def semantic_search_clustered(
+        self,
+        query: str,
+        top_k: int = 20,
+        service: Optional[str] = None,
+        level: Optional[str] = None,
+        score_threshold: float = 0.7,
+        similarity_threshold: float = 0.85
+    ) -> Dict[str, Any]:
+        """
+        Perform semantic search and return clustered results
+        
+        Clustering hierarchy:
+        1. Environment (production, staging, dev)
+        2. Service (api-gateway, auth-service, etc.)
+        3. Level (ERROR, WARN, etc.)
+        4. Normalized Pattern (parameterized messages)
+        5. Similarity (group logs with score > similarity_threshold)
+        
+        Args:
+            query: Search query text
+            top_k: Maximum number of results
+            service: Optional service filter
+            level: Optional level filter
+            score_threshold: Minimum similarity score
+            similarity_threshold: Not used in pattern-based clustering
+            
+        Returns:
+            Clustered search results grouped by environment
+        """
+        start_time = time.time()
+        
+        # Step 1: Get raw search results (same as before)
+        results = await self.semantic_search(
+            query=query,
+            limit=top_k,
+            service=service,
+            level=level,
+            score_threshold=score_threshold,
+            enrich_with_clickhouse=True
+        )
+        
+        # Step 2: Normalize messages for pattern extraction
+        for log in results:
+            log["normalized_message"] = self._normalize_message(log["message"])
+        
+        # Step 3: Group by environment
+        env_groups = {}
+        for log in results:
+            env = log["environment"]
+            if env not in env_groups:
+                env_groups[env] = []
+            env_groups[env].append(log)
+        
+        # Step 4: Within each environment, cluster by service + level + pattern
+        environment_clusters = []
+        
+        for env, env_logs in env_groups.items():
+            # Group by service
+            service_groups = {}
+            for log in env_logs:
+                svc = log["service"]
+                if svc not in service_groups:
+                    service_groups[svc] = []
+                service_groups[svc].append(log)
+            
+            clusters = []
+            cluster_idx = 0
+            
+            for svc, svc_logs in service_groups.items():
+                # Group by level
+                level_groups = {}
+                for log in svc_logs:
+                    lvl = log["level"]
+                    if lvl not in level_groups:
+                        level_groups[lvl] = []
+                    level_groups[lvl].append(log)
+                
+                for lvl, lvl_logs in level_groups.items():
+                    # Group by normalized pattern
+                    pattern_groups = {}
+                    for log in lvl_logs:
+                        pattern = log["normalized_message"]
+                        if pattern not in pattern_groups:
+                            pattern_groups[pattern] = []
+                        pattern_groups[pattern].append(log)
+                    
+                    # Create clusters for each pattern group
+                    for pattern, pattern_logs in pattern_groups.items():
+                        # Sort by similarity score within pattern
+                        pattern_logs.sort(key=lambda x: x["similarity_score"], reverse=True)
+                        
+                        clusters.append(self._create_cluster(
+                            env, svc, lvl, pattern_logs, cluster_idx, pattern
+                        ))
+                        cluster_idx += 1
+            
+            environment_clusters.append({
+                "environment": env,
+                "total_logs": len(env_logs),
+                "clusters": clusters
+            })
+        
+        generation_time = time.time() - start_time
+        
+        return {
+            "query": query,
+            "total_results": len(results),
+            "environment_groups": environment_clusters,
+            "generation_time_seconds": round(generation_time, 3)
+        }
+
+    def _create_cluster(
+        self,
+        environment: str,
+        service: str,
+        level: str,
+        logs: List[Dict],
+        idx: int,
+        normalized_pattern: str
+    ) -> Dict:
+        """Helper to create a cluster object with pattern info"""
+        avg_similarity = sum(log["similarity_score"] for log in logs) / len(logs)
+        
+        # Use normalized pattern as dominant pattern (first 80 chars)
+        dominant_pattern = normalized_pattern[:80] + "..." if len(normalized_pattern) > 80 else normalized_pattern
+        
+        timestamps = [log["timestamp"] for log in logs]
+        
+        return {
+            "cluster_id": f"{environment}_{service}_{level}_{idx}",
+            "metadata": {
+                "environment": environment,
+                "service": service,
+                "level": level,
+                "avg_similarity": round(avg_similarity, 3),
+                "log_count": len(logs),
+                "time_range": {
+                    "earliest": min(timestamps),
+                    "latest": max(timestamps)
+                },
+                "dominant_message_pattern": dominant_pattern
+            },
+            "logs": logs
+        }

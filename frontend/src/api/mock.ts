@@ -70,6 +70,7 @@ const generateThroughputData = (): MetricPoint[] => {
     time: `${String(i).padStart(2, "0")}:00`,
     value: Math.floor(Math.random() * 3000) + 1000,
     errors: Math.floor(Math.random() * 50),
+    warns: Math.floor(Math.random() * 100) + 20,
   }));
 };
 
@@ -621,6 +622,87 @@ export const mockApi = {
       anomaly_count: data.filter(d => d.is_anomaly).length,
       baseline_mean: 0,
       baseline_stddev: 0.8,
+    };
+  },
+
+  // Semantic Search - Clustered
+  searchSemanticClustered: async (params: {
+    query: string;
+    top_k?: number;
+    level?: string;
+    service?: string;
+  }): Promise<any> => {
+    await new Promise((r) => setTimeout(r, 600));
+    
+    // Generate mock clustered results
+    const now = Date.now();
+    
+    return {
+      query: params.query,
+      total_results: 12,
+      generation_time_seconds: 0.542,
+      environment_groups: [
+        {
+          environment: "production",
+          total_logs: 9,
+          clusters: [
+            {
+              cluster_id: "production_auth-service_ERROR_0",
+              metadata: {
+                environment: "production",
+                service: "auth-service",
+                level: "ERROR",
+                avg_similarity: 0.92,
+                log_count: 5,
+                time_range: {
+                  earliest: new Date(now - 3600000).toISOString(),
+                  latest: new Date(now - 300000).toISOString(),
+                },
+                dominant_message_pattern: "Failed to authenticate user: invalid credentials for user {uuid}",
+              },
+              logs: mockSemanticSearchResults.slice(0, 5).map(r => ({...r, environment: "production", service: "auth-service", level: "ERROR"})),
+            },
+            {
+              cluster_id: "production_api-gateway_ERROR_1",
+              metadata: {
+                environment: "production",
+                service: "api-gateway",
+                level: "ERROR",
+                avg_similarity: 0.87,
+                log_count: 4,
+                time_range: {
+                  earliest: new Date(now - 7200000).toISOString(),
+                  latest: new Date(now - 600000).toISOString(),
+                },
+                dominant_message_pattern: "Connection timeout while reaching upstream {service}:{num}",
+              },
+              logs: mockSemanticSearchResults.slice(5, 9).map(r => ({...r, environment: "production", service: "api-gateway", level: "ERROR"})),
+            },
+          ],
+        },
+        {
+          environment: "staging",
+          total_logs: 3,
+          clusters: [
+            {
+              cluster_id: "staging_payment-service_WARN_0",
+              metadata: {
+                environment: "staging",
+                service: "payment-service",
+                level: "WARN",
+                avg_similarity: 0.85,
+                log_count: 3,
+                time_range: {
+                  earliest: new Date(now - 1800000).toISOString(),
+                  latest: new Date(now - 120000).toISOString(),
+                },
+                dominant_message_pattern: "PaymentGatewayClient: Latency spike detected ({num}ms)",
+              },
+              logs: mockSemanticSearchResults.slice(9, 12).map(r => ({...r, environment: "staging", service: "payment-service", level: "WARN"})),
+            },
+          ],
+        },
+      ],
     };
   },
 };

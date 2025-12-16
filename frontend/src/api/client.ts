@@ -93,6 +93,38 @@ export interface SemanticSearchResponse {
   generation_time_seconds: number;
 }
 
+export interface ClusterMetadata {
+  environment: string;
+  service: string;
+  level: string;
+  avg_similarity: number;
+  log_count: number;
+  time_range: {
+    earliest: string;
+    latest: string;
+  };
+  dominant_message_pattern: string;
+}
+
+export interface LogCluster {
+  cluster_id: string;
+  metadata: ClusterMetadata;
+  logs: SemanticSearchResult[];
+}
+
+export interface EnvironmentGroup {
+  environment: string;
+  total_logs: number;
+  clusters: LogCluster[];
+}
+
+export interface ClusteredSearchResponse {
+  query: string;
+  total_results: number;
+  environment_groups: EnvironmentGroup[];
+  generation_time_seconds: number;
+}
+
 export interface ErrorPattern {
   pattern_hash: string;
   normalized_message: string;
@@ -359,6 +391,20 @@ export const api = {
     report_start_time?: string;
   }): Promise<any> => {
     const { data } = await apiClient.get("/api/anomalies/zscore", { params });
+    return data;
+  },
+
+  // Semantic Search - Clustered
+  searchSemanticClustered: async (params: {
+    query: string;
+    top_k?: number;
+    level?: string;
+    service?: string;
+  }): Promise<ClusteredSearchResponse> => {
+    const { data } = await apiClient.post<ClusteredSearchResponse>(
+      "/api/search/semantic?return_clusters=true",
+      params
+    );
     return data;
   },
 };

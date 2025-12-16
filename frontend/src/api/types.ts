@@ -25,8 +25,9 @@ export interface AnomalyCluster {
 
 export interface MetricPoint {
   time: string;
-  value: number;
+  value: number;  // Total logs
   errors?: number;
+  warns?: number;
 }
 
 export interface OverviewMetrics {
