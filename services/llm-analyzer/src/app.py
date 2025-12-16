@@ -249,6 +249,7 @@ class PatternInfo(BaseModel):
     normalized_message: str
     count: int
     services: List[str]
+    environments: List[str]  # Track which environments this pattern appears in
     example_message: str
     first_seen: datetime
     last_seen: datetime
@@ -395,27 +396,67 @@ class LLMAnalyzerService:
     # -------------------------------------------------------------------------
 
     def normalize_error_message(self, message: str) -> str:
-        """Normalize error message for pattern detection"""
-        # Remove UUIDs
+        """
+        Normalize error message for pattern detection
+        Enhanced to handle common variable patterns in logs
+        """
+        # 1. Remove UUIDs (before other number patterns)
         message = re.sub(
             r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
             '<UUID>', message, flags=re.IGNORECASE
         )
-        # Remove numbers
-        message = re.sub(r'\b\d+\b', '<NUM>', message)
-        # Remove timestamps
+        
+        # 2. Remove full timestamps (ISO format, etc.)
         message = re.sub(
-            r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}',
+            r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?',
             '<TIMESTAMP>', message
         )
-        # Remove IPs
+        
+        # 3. Remove IP addresses (before general numbers)
         message = re.sub(
             r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b',
             '<IP>', message
         )
-        # Remove hex strings
+        
+        # 4. Remove hex strings
         message = re.sub(r'\b0x[0-9a-fA-F]+\b', '<HEX>', message)
-        # Normalize whitespace
+        
+        # 5. Normalize numbers with units (e.g., 45s, 100ms, 2GB, 5.5MB)
+        message = re.sub(
+            r'\b\d+(?:\.\d+)?(?:ms|s|m|h|d|MB|GB|KB|TB|%)\b',
+            '<NUM_UNIT>', message, flags=re.IGNORECASE
+        )
+        
+        # 6. Normalize IDs with numbers (e.g., client_8111, user_id_42, session-123)
+        # Match: word + separator + digits
+        message = re.sub(
+            r'\b([a-zA-Z_]+[_-])(\d+)\b',
+            r'\1<NUM>', message
+        )
+        
+        # 7. Normalize port numbers (e.g., :8080, :5432)
+        message = re.sub(r':(\d{2,5})\b', r':<PORT>', message)
+        
+        # 8. Normalize version numbers (e.g., v1.2.3, version 2.0)
+        message = re.sub(
+            r'\bv?\d+\.\d+(?:\.\d+)?(?:\.\d+)?\b',
+            '<VERSION>', message, flags=re.IGNORECASE
+        )
+        
+        # 9. Normalize memory addresses (e.g., 0x7ffe1234abcd)
+        message = re.sub(r'\b0x[0-9a-fA-F]{8,}\b', '<ADDR>', message)
+        
+        # 10. Normalize standalone numbers (catch-all for remaining numbers)
+        # This should come LAST to avoid conflicts
+        message = re.sub(r'\b\d+\b', '<NUM>', message)
+        
+        # 11. Normalize file paths (optional - can help cluster file-related errors)
+        message = re.sub(
+            r'[/\\][\w\-./\\]+\.(py|java|js|ts|go|rb|php|cpp|c|h)',
+            '<FILE>', message, flags=re.IGNORECASE
+        )
+        
+        # 12. Normalize whitespace (multiple spaces/tabs → single space)
         message = ' '.join(message.split())
 
         return message
@@ -505,6 +546,7 @@ class LLMAnalyzerService:
                     'normalized_message': normalized,
                     'count': 0,
                     'services': set(),
+                    'environments': set(),  # Track unique environments
                     'example_message': log['message'],
                     'first_seen': log['timestamp'],
                     'last_seen': log['timestamp'],
@@ -515,6 +557,7 @@ class LLMAnalyzerService:
             pattern_data = pattern_map[pattern_hash]
             pattern_data['count'] += 1
             pattern_data['services'].add(log['service'])
+            pattern_data['environments'].add(log['environment'])  # Track environment
 
             # Collect up to 5 sample log IDs for investigation (convert UUID to string)
             if len(pattern_data['sample_log_ids']) < 5:
@@ -541,6 +584,7 @@ class LLMAnalyzerService:
                 normalized_message=pattern_data['normalized_message'],
                 count=pattern_data['count'],
                 services=list(pattern_data['services']),
+                environments=list(pattern_data['environments']),  # Include environments
                 example_message=pattern_data['example_message'],
                 first_seen=pattern_data['first_seen'],
                 last_seen=pattern_data['last_seen'],
@@ -585,6 +629,8 @@ class LLMAnalyzerService:
                     has_embedding,
                     qdrant_point_id,
                     sample_stack_trace,
+                    environments,
+                    created_at,
                     updated_at
                 FROM error_patterns
                 WHERE error_hash IN ({hash_placeholders})
@@ -604,7 +650,9 @@ class LLMAnalyzerService:
                         'has_embedding': row[5],
                         'qdrant_point_id': row[6],
                         'sample_stack_trace': row[7],
-                        'last_updated': row[8],
+                        'environments': row[8] or [],  # Existing environments
+                        'created_at': row[9],  # Preserve original creation time
+                        'last_updated': row[10],
                     }
             except Exception as e:
                 self.logger.warning("existing_patterns_query_failed", error=str(e))
@@ -634,6 +682,8 @@ class LLMAnalyzerService:
                 catalog_info = catalog_known_patterns.get(pattern.pattern_hash, {})
 
                 # Calculate trend by comparing current count with historical count
+                # Note: ClickHouse trend enum only supports: increasing, stable, decreasing
+                # Map 'new' patterns to 'increasing' since they're appearing for the first time
                 trend = 'stable'
                 if pattern.pattern_hash in existing_patterns:
                     previous_count = existing.get('previous_count', 0)
@@ -646,7 +696,8 @@ class LLMAnalyzerService:
                         else:
                             trend = 'stable'
                 else:
-                    trend = 'new'  # First time seeing this pattern
+                    # First time seeing this pattern - map to 'increasing' (valid enum value)
+                    trend = 'increasing'
 
                 # Determine is_known: prefer catalog, fallback to existing clickhouse value
                 is_known = catalog_info.get('is_known', existing.get('is_known', 0))
@@ -654,6 +705,24 @@ class LLMAnalyzerService:
                 # Merge category and tags from catalog if available
                 category = catalog_info.get('category') or existing.get('category', '')
                 tags = catalog_info.get('tags', existing.get('tags', []))
+                
+                # Merge environments: combine existing + new, keep unique only
+                existing_environments = existing.get('environments', [])
+                merged_environments = list(set(existing_environments + pattern.environments))
+
+                # Preserve created_at for existing patterns, set to now for new ones
+                created_at = existing.get('created_at', datetime.now(timezone.utc))
+
+                # Convert sample_log_ids from strings to UUID objects for ClickHouse Array(UUID) type
+                from uuid import UUID as PyUUID
+                sample_log_ids_as_uuid = []
+                for log_id_str in pattern.sample_log_ids:
+                    try:
+                        # Convert string UUID to UUID object
+                        sample_log_ids_as_uuid.append(PyUUID(log_id_str) if isinstance(log_id_str, str) else log_id_str)
+                    except (ValueError, AttributeError):
+                        # Skip invalid UUIDs
+                        pass
 
                 row = {
                     'error_hash': pattern.pattern_hash,
@@ -662,9 +731,9 @@ class LLMAnalyzerService:
                     'last_seen': pattern.last_seen,
                     'occurrence_count': pattern.count,
                     'services': pattern.services,
-                    'environments': ['production'],
+                    'environments': merged_environments,  # Merged unique environments
                     'max_level': pattern.max_level,
-                    'sample_log_ids': pattern.sample_log_ids,  # Store actual sample log IDs
+                    'sample_log_ids': sample_log_ids_as_uuid,  # Converted to UUID objects
 
                     # Preserve/update metadata
                     'sample_stack_trace': existing.get('sample_stack_trace', ''), #TODO: potential data duplication (already exists inside clikchouse logs table)
@@ -677,35 +746,77 @@ class LLMAnalyzerService:
                     # Dynamic fields
                     'avg_occurrences_per_day': pattern.count / max(1, (pattern.last_seen - pattern.first_seen).days or 1),
                     'trend': trend,  # Calculated based on historical data
+                    
+                    # Timestamps - preserve created_at, always update updated_at
+                    'created_at': created_at,
                     'updated_at': datetime.now(timezone.utc),
                 }
                 rows.append(row)
 
             # Step 4: Insert with all fields
+            # Use native ClickHouse INSERT with proper column ordering
+            
+            if not rows:
+                self.logger.warning("no_rows_to_insert")
+                return
+            
+            # Specify column order explicitly to match table schema (excluding pattern_id which is auto-generated)
+            column_order = [
+                'error_hash', 'normalized_message', 'first_seen', 'last_seen', 'occurrence_count',
+                'services', 'environments', 'max_level', 'sample_log_ids', 'sample_stack_trace',
+                'is_known', 'category', 'tags', 'has_embedding', 'qdrant_point_id',
+                'avg_occurrences_per_day', 'trend', 'created_at', 'updated_at'
+            ]
+            
+            # Build data in the correct column order
+            data_ordered = []
+            for row in rows:
+                data_ordered.append([row[col] for col in column_order])
+            
+            # Debug logging
+            self.logger.info("inserting_patterns", 
+                           pattern_count=len(rows),
+                           column_count=len(column_order),
+                           sample_row_length=len(data_ordered[0]) if data_ordered else 0)
+            
+            # Insert using ordered data
             self.ch_client.insert(
                 'error_patterns',
-                rows,
-                column_names=list(rows[0].keys())
+                data_ordered,  # List of lists (each inner list is a row)
+                column_names=column_order  # Explicit column order
             )
 
             ERROR_PATTERNS_CREATED.inc(len(rows))
 
             # Enhanced logging with trend breakdown
             trend_counts = {}
+            new_pattern_count = 0
             for row in rows:
                 trend = row['trend']
                 trend_counts[trend] = trend_counts.get(trend, 0) + 1
+                # Count new patterns (those not in existing_patterns dict)
+                if row['error_hash'] not in existing_patterns:
+                    new_pattern_count += 1
 
             self.logger.info("error_patterns_updated",
                            count=len(rows),
-                           new_patterns=trend_counts.get('new', 0),
+                           new_patterns=new_pattern_count,
                            increasing=trend_counts.get('increasing', 0),
                            decreasing=trend_counts.get('decreasing', 0),
                            stable=trend_counts.get('stable', 0),
                            known_issues=len([r for r in rows if r['is_known'] == 1]))
 
         except Exception as e:
-            self.logger.error("error_patterns_update_failed", error=str(e))
+            import traceback
+            error_details = traceback.format_exc()
+            self.logger.error(
+                "error_patterns_update_failed", 
+                error=str(e),
+                error_type=type(e).__name__,
+                traceback=error_details,
+                pattern_count=len(patterns) if patterns else 0,
+                sample_pattern=patterns[0].pattern_hash if patterns else None
+            )
 
     # -------------------------------------------------------------------------
     # PostgreSQL Table Updates
@@ -785,12 +896,18 @@ class LLMAnalyzerService:
                 ).first()
 
                 if not recent_alert:
+                    # Use primary environment (first one) or most critical (production > staging > development)
+                    # If pattern appears in production, prioritize that for alerting
+                    primary_environment = 'production' if 'production' in pattern.environments else (
+                        pattern.environments[0] if pattern.environments else 'unknown'
+                    )
+                    
                     alert = AnomalyAlert(
                         alert_id=uuid4(),
                         anomaly_type='error_spike',
                         detected_at=datetime.now(timezone.utc),
                         service=pattern.services[0] if pattern.services else None,
-                        environment='production',
+                        environment=primary_environment,  # Use actual environment from pattern
                         time_window='24 hours',
                         description=f"High frequency error pattern detected: {pattern.normalized_message}",
                         metrics={
@@ -798,6 +915,7 @@ class LLMAnalyzerService:
                             'percentage_of_errors': round((pattern.count / total_logs) * 100, 2),
                             'threshold': anomaly_threshold,
                             'affected_services': pattern.services,
+                            'affected_environments': pattern.environments,  # Include all environments
                         },
                         affected_log_ids=[],
                         sample_logs=[],
@@ -1029,7 +1147,7 @@ Format your response clearly with sections. Be concise and actionable."""
                 report_id = uuid4()
                 report = NightlyReport(
                     report_id=report_id,
-                    report_date=datetime.strptime("16/12/2025", "%d/%m/%Y").date(),#datetime.now(timezone.utc).date(),
+                    report_date=datetime.strptime("14/12/2025", "%d/%m/%Y").date(),#datetime.now(timezone.utc).date(),#TODO: make sure to set this back to the system timestamp later
                     start_time=start_time,
                     end_time=end_time,
                     total_logs_processed=len(logs),
