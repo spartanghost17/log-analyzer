@@ -6,7 +6,7 @@ import { MainChart } from "../components/charts/MainChart";
 import { format } from "date-fns";
 
 // Toggle this to switch between mock and real API
-const USE_MOCK_API = true;
+const USE_MOCK_API = false;
 
 export const Overview = () => {
   const navigate = useNavigate();
