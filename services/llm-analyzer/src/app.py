@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     ollama_host: str = Field(default="http://localhost:11434", validation_alias="OLLAMA_HOST")
     ollama_model: str = Field(default="deepseek-coder:6.7b", validation_alias="OLLAMA_MODEL")
     ollama_timeout: int = Field(default=300, validation_alias="OLLAMA_TIMEOUT")
+    ollama_temperature: float = Field(default=0.3, validation_alias="OLLAMA_TEMPERATURE")
+    ollama_top_p: float = Field(default=0.9, validation_alias="OLLAMA_TOP_P")
 
     # Analysis settings
     analysis_window_hours: int = Field(default=24, ge=1, le=168, validation_alias="ANALYSIS_WINDOW_HOURS")
@@ -251,7 +253,7 @@ class PatternInfo(BaseModel):
     first_seen: datetime
     last_seen: datetime
     max_level: str
-    sample_log_ids: List[str] = []  # Store sample log IDs for investigation
+    sample_log_ids: List[str] = []  # Store sample log IDs for investigation (as strings)
 
 
 class AnalysisResponse(BaseModel):
@@ -276,12 +278,21 @@ class ReportResponse(BaseModel):
     end_time: str
     total_logs_processed: int
     error_count: int
+    warning_count: int
     unique_error_patterns: int
+    new_error_patterns: int
     anomalies_detected: int
+    critical_issues: int
     executive_summary: str
     top_issues: List[Dict[str, Any]]
     recommendations: List[str]
+    affected_services: Optional[Dict[str, Any]] = None
     generation_time_seconds: float
+    llm_model_used: Optional[str] = None
+    tokens_used: Optional[int] = None
+    status: str
+    error_message: Optional[str] = None
+    created_at: str
 
 
 class HealthResponse(BaseModel):
@@ -505,9 +516,11 @@ class LLMAnalyzerService:
             pattern_data['count'] += 1
             pattern_data['services'].add(log['service'])
 
-            # Collect up to 5 sample log IDs for investigation
+            # Collect up to 5 sample log IDs for investigation (convert UUID to string)
             if len(pattern_data['sample_log_ids']) < 5:
-                pattern_data['sample_log_ids'].append(log['log_id'])
+                log_id = log['log_id']
+                # Convert UUID to string if it's a UUID object
+                pattern_data['sample_log_ids'].append(str(log_id) if not isinstance(log_id, str) else log_id)
 
             # Update first/last seen
             if log['timestamp'] < pattern_data['first_seen']:
@@ -750,6 +763,7 @@ class LLMAnalyzerService:
         self,
         patterns: List[PatternInfo],
         total_logs: int,
+        logs: List[Dict[str, Any]],
         llm_analysis: str,
         session
     ):
@@ -845,7 +859,7 @@ CONTEXT:
 TOP ERROR PATTERNS:
 """
 
-        for i, pattern in enumerate(patterns[:10], 1):
+        for i, pattern in enumerate[PatternInfo](patterns[:10], 1):
             prompt += f"\n{i}. [{pattern.count} occurrences across {len(pattern.services)} service(s)]"
             prompt += f"\n   Pattern: {pattern.normalized_message}"
             prompt += f"\n   Services: {', '.join(pattern.services)}"
@@ -885,11 +899,22 @@ Format your response clearly with sections. Be concise and actionable."""
 
                 return analysis_text, tokens_used
             else:
-                self.logger.error("llm_request_failed", status=response.status_code)
-                return "LLM analysis unavailable", 0
+                error_body = response.text
+                self.logger.error(
+                    "llm_request_failed", 
+                    status=response.status_code,
+                    model=self.settings.ollama_model,
+                    error_body=error_body[:500]  # First 500 chars
+                )
+                return f"LLM analysis unavailable (HTTP {response.status_code}): {error_body[:200]}", 0
 
         except Exception as e:
-            self.logger.error("llm_analysis_failed", error=str(e))
+            self.logger.error(
+                "llm_analysis_failed", 
+                error=str(e),
+                model=self.settings.ollama_model,
+                ollama_host=self.settings.ollama_host
+            )
             return f"LLM analysis failed: {str(e)}", 0
 
     # -------------------------------------------------------------------------
@@ -992,6 +1017,7 @@ Format your response clearly with sections. Be concise and actionable."""
                 anomalies_count = self.create_anomaly_alerts(
                     patterns,
                     len(logs),
+                    logs,
                     llm_analysis,
                     session
                 )
@@ -1003,7 +1029,7 @@ Format your response clearly with sections. Be concise and actionable."""
                 report_id = uuid4()
                 report = NightlyReport(
                     report_id=report_id,
-                    report_date=datetime.now(timezone.utc).date(),
+                    report_date=datetime.strptime("16/12/2025", "%d/%m/%Y").date(),#datetime.now(timezone.utc).date(),
                     start_time=start_time,
                     end_time=end_time,
                     total_logs_processed=len(logs),
@@ -1141,12 +1167,21 @@ Format your response clearly with sections. Be concise and actionable."""
                         end_time=report.end_time.isoformat(),
                         total_logs_processed=report.total_logs_processed or 0,
                         error_count=report.error_count or 0,
+                        warning_count=report.warning_count or 0,
                         unique_error_patterns=report.unique_error_patterns or 0,
+                        new_error_patterns=report.new_error_patterns or 0,
                         anomalies_detected=report.anomalies_detected or 0,
+                        critical_issues=report.critical_issues or 0,
                         executive_summary=report.executive_summary or '',
                         top_issues=report.top_issues or [],
                         recommendations=report.recommendations or [],
-                        generation_time_seconds=report.generation_time_seconds or 0.0
+                        affected_services=report.affected_services,
+                        generation_time_seconds=report.generation_time_seconds or 0.0,
+                        llm_model_used=report.llm_model_used,
+                        tokens_used=report.tokens_used,
+                        status=report.status or 'completed',
+                        error_message=report.error_message,
+                        created_at=report.created_at.isoformat() if report.created_at else ''
                     )
 
                 return None
@@ -1182,12 +1217,17 @@ async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
 
     # Schedule anomaly baseline calculation for Sunday at 3 AM
+    def scheduled_baseline_calculation():
+        """Wrapper function to create a session for the scheduled job"""
+        with analyzer_service.SessionLocal() as session:
+            return run_baseline_calculation(
+                clickhouse_client=analyzer_service.ch_client,
+                postgres_session=session,
+                lookback_days=30
+            )
+    
     scheduler.add_job(
-        func=lambda: run_baseline_calculation(
-            clickhouse_client=analyzer_service.ch_client,
-            postgres_session=analyzer_service.pg_session,
-            lookback_days=30
-        ),
+        func=scheduled_baseline_calculation,
         trigger=CronTrigger(day_of_week='sun', hour=3, minute=0),
         id='anomaly_baseline_calculation',
         name='Weekly Anomaly Baseline Calculation',
@@ -1310,7 +1350,7 @@ async def get_latest_report():
         )
 
     report = analyzer_service.get_latest_report()
-
+    logger.info("get_latest_report", report=report)
     if report is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1351,12 +1391,14 @@ async def trigger_baseline_calculation(
 
     def run_calculation():
         try:
-            result = run_baseline_calculation(
-                clickhouse_client=analyzer_service.ch_client,
-                postgres_session=analyzer_service.pg_session,
-                lookback_days=lookback_days
-            )
-            logger.info("baseline_calculation_triggered", job_id=job_id, result=result)
+            # Create a session for the background task
+            with analyzer_service.SessionLocal() as session:
+                result = run_baseline_calculation(
+                    clickhouse_client=analyzer_service.ch_client,
+                    postgres_session=session,
+                    lookback_days=lookback_days
+                )
+                logger.info("baseline_calculation_triggered", job_id=job_id, result=result)
         except Exception as e:
             logger.error("baseline_calculation_failed", job_id=job_id, error=str(e))
 
@@ -1397,20 +1439,21 @@ async def get_baseline_jobs():
         LIMIT 20
     """)
 
-    result = analyzer_service.pg_session.execute(query)
-    jobs = []
+    with analyzer_service.SessionLocal() as session:
+        result = session.execute(query)
+        jobs = []
 
-    for row in result:
-        jobs.append({
-            "job_id": str(row[0]),
-            "status": row[1],
-            "parameters": row[2],
-            "started_at": row[3].isoformat() if row[3] else None,
-            "completed_at": row[4].isoformat() if row[4] else None,
-            "processing_time_seconds": row[5],
-            "result": row[6],
-            "error_message": row[7]
-        })
+        for row in result:
+            jobs.append({
+                "job_id": str(row[0]),
+                "status": row[1],
+                "parameters": row[2],
+                "started_at": row[3].isoformat() if row[3] else None,
+                "completed_at": row[4].isoformat() if row[4] else None,
+                "processing_time_seconds": row[5],
+                "result": row[6],
+                "error_message": row[7]
+            })
 
     return {
         "jobs": jobs,

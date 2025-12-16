@@ -170,25 +170,27 @@ class AnomalyBaselineCalculator:
             SELECT
                 toDayOfWeek(hour) as day_of_week,
                 toHour(hour) as hour_of_day,
-                sum(log_count) as count
+                log_count as count
             FROM logs_hourly_agg
             WHERE service = {service:String}
                 AND environment = {environment:String}
                 AND level = {level:String}
                 AND hour >= now() - INTERVAL {lookback_days:UInt32} DAY
-            GROUP BY day_of_week, hour_of_day, service, environment, level
             ORDER BY day_of_week, hour_of_day
         """
-
-        result = self.ch_client.query(
-            query,
-            parameters={
-                "service": service,
-                "environment": environment,
-                "level": level,
-                "lookback_days": lookback_days
-            }
-        )
+        try:
+            result = self.ch_client.query(
+                query,
+                parameters={
+                    "service": service,
+                    "environment": environment,
+                    "level": level,
+                    "lookback_days": lookback_days
+                }
+            )
+        except Exception as e:
+            self.logger.error("failed_to_query_hourly_counts", error=str(e), service=service, environment=environment, level=level, lookback_days=lookback_days)
+            raise
 
         # Group data by (day_of_week, hour_of_day)
         grouped_data = {}
@@ -209,7 +211,6 @@ class AnomalyBaselineCalculator:
                 continue
 
             stats = self._calculate_statistics(counts)
-
             # Calculate thresholds (mean ± 2*stddev)
             lower_threshold = max(0, stats['mean'] - 2 * stats['stddev'])
             upper_threshold = stats['mean'] + 2 * stats['stddev']
@@ -326,12 +327,13 @@ class AnomalyBaselineCalculator:
             lookback_days: Lookback period used
         """
         from sqlalchemy import text
+        import json
 
         query = text("""
             INSERT INTO analysis_jobs (
                 job_id, job_type, status, parameters, started_at, created_at
             ) VALUES (
-                :job_id, :job_type, :status, :parameters::jsonb, :started_at, :created_at
+                :job_id, :job_type, :status, CAST(:parameters AS jsonb), :started_at, :created_at
             )
         """)
 
@@ -339,7 +341,7 @@ class AnomalyBaselineCalculator:
             "job_id": job_id,
             "job_type": "anomaly_baseline_calculation",
             "status": "running",
-            "parameters": f'{{"lookback_days": {lookback_days}}}',
+            "parameters": json.dumps({"lookback_days": lookback_days}),
             "started_at": datetime.now(timezone.utc),
             "created_at": datetime.now(timezone.utc)
         })
@@ -356,6 +358,7 @@ class AnomalyBaselineCalculator:
             result: Job results
         """
         from sqlalchemy import text
+        import json
 
         completed_at = datetime.now(timezone.utc) if result.get('status') == 'completed' else None
         processing_time = result.get('duration_seconds')
@@ -364,13 +367,12 @@ class AnomalyBaselineCalculator:
             UPDATE analysis_jobs
             SET status = :status,
                 completed_at = :completed_at,
-                result = :result::jsonb,
+                result = CAST(:result AS jsonb),
                 error_message = :error_message,
                 processing_time_seconds = :processing_time
             WHERE job_id = :job_id
         """)
 
-        import json
         self.pg_session.execute(query, {
             "job_id": job_id,
             "status": result.get('status', 'completed'),
