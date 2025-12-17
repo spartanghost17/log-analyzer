@@ -421,6 +421,261 @@ sequenceDiagram
 
 ---
 
+## Anomaly Detection & Baseline Calculation
+
+One of the platform's core features is **intelligent anomaly detection** using statistical baselines and Z-score analysis. This system automatically identifies unusual patterns in log volume that may indicate system issues.
+
+### Overview
+
+The anomaly detection system uses **pattern-based baselines** to establish what's "normal" for your system, then flags deviations that exceed statistical thresholds.
+
+### How It Works
+
+#### 1. **Hourly Log Aggregation**
+
+As logs are ingested, ClickHouse automatically aggregates them into hourly buckets using a **materialized view**:
+
+```sql
+-- Materialized view aggregates logs into hourly counts
+CREATE MATERIALIZED VIEW logs_hourly_agg_mv TO logs_hourly_agg
+AS SELECT
+    toStartOfHour(timestamp) as hour,
+    service,
+    environment,
+    level,
+    count() as log_count
+FROM logs
+GROUP BY hour, service, environment, level;
+```
+
+**Result**: Each row represents log count for a specific hour:
+```
+2025-12-02 03:00:00 | api-service | prod | ERROR | 210 logs
+2025-12-09 03:00:00 | api-service | prod | ERROR | 215 logs
+2025-12-16 03:00:00 | api-service | prod | ERROR | 218 logs
+2025-12-23 03:00:00 | api-service | prod | ERROR | 850 logs ⚠️
+```
+
+#### 2. **Pattern-Based Baseline Calculation**
+
+The system calculates baselines based on **day-of-week and hour-of-day patterns** rather than simple time-based averages. This accounts for weekly patterns (e.g., Mondays are busier than Sundays, 3 AM has fewer logs than 3 PM).
+
+**Key Concept**: To know what's "normal" for "Monday at 3 AM", we look at **multiple Mondays at 3 AM** across the lookback period:
+
+```python
+# For each (day_of_week, hour_of_day) combination:
+# - Collect log_count values from multiple weeks
+# - Calculate mean, standard deviation, percentiles
+# - Set thresholds: mean ± (2 × stddev)
+
+# Example: Monday 3 AM baseline
+samples = [210, 215, 218, 209]  # 4 weeks of data
+mean = 213.0
+stddev = 4.0
+upper_threshold = 221.0  # mean + 2*stddev
+lower_threshold = 205.0  # mean - 2*stddev
+```
+
+#### 3. **Statistical Requirements**
+
+**Minimum Data**: You need at least **2 samples** of each pattern to calculate standard deviation (statistical requirement - can't divide by zero!).
+
+| Lookback Period | Samples per Pattern | Quality |
+|-----------------|---------------------|---------|
+| 8 days | ~1 sample | ❌ Insufficient (need 2+) |
+| 30 days | ~4 samples | ✅ Minimum viable |
+| 90 days | ~12 samples | ✅✅ Good |
+| 365 days | ~52 samples | ✅✅✅ Excellent (seasonal) |
+
+#### 4. **Baseline Calculation Process**
+
+```mermaid
+graph TB
+    A[Query logs_hourly_agg<br/>Last 30 days] --> B[Extract day_of_week<br/>and hour_of_day]
+    B --> C[Group by<br/>day_of_week, hour_of_day]
+    C --> D{Has 2+<br/>samples?}
+    D -->|Yes| E[Calculate Statistics<br/>mean, stddev, p95, p99]
+    D -->|No| F[Skip - insufficient data]
+    E --> G[Set Thresholds<br/>upper = mean + 2*stddev<br/>lower = mean - 2*stddev]
+    G --> H[Store in<br/>anomaly_baselines table]
+    
+    style E fill:#4CAF50,color:#fff
+    style G fill:#2196F3,color:#fff
+    style H fill:#9C27B0,color:#fff
+```
+
+**Example Query** (simplified):
+```sql
+-- Get individual hourly counts for pattern analysis
+SELECT
+    toDayOfWeek(hour) as day_of_week,  -- 1=Monday, 7=Sunday
+    toHour(hour) as hour_of_day,        -- 0-23
+    log_count
+FROM logs_hourly_agg
+WHERE service = 'api-service'
+    AND environment = 'prod'
+    AND level = 'ERROR'
+    AND hour >= now() - INTERVAL 30 DAY
+ORDER BY day_of_week, hour_of_day
+```
+
+#### 5. **Real-Time Z-Score Calculation**
+
+When analyzing current log volumes, the system calculates **Z-scores** to determine how many standard deviations away from normal a value is:
+
+```
+Z-score = (actual_count - baseline_mean) / baseline_stddev
+
+Examples:
+- actual=220, mean=213, stddev=4 → Z=1.75 ✅ Normal
+- actual=850, mean=213, stddev=4 → Z=159.25 🚨 ANOMALY!
+```
+
+**Interpretation**:
+- `|Z| < 2.0`: Normal variation (within 95% confidence)
+- `2.0 ≤ |Z| < 3.0`: Minor anomaly (warning)
+- `|Z| ≥ 3.0`: Significant anomaly (alert)
+
+#### 6. **Baseline Update Schedule**
+
+- **Frequency**: Automatically recalculated nightly (default: 2 AM)
+- **Trigger**: Can be manually triggered via API: `POST /baselines/trigger`
+- **Lookback**: Configurable (default: 30 days)
+- **Storage**: Baselines stored in ClickHouse `anomaly_baselines` table
+
+### Data Flow Example
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant L as Logs Table
+    participant H as logs_hourly_agg<br/>(Materialized View)
+    participant B as Baseline Calculator
+    participant BT as anomaly_baselines<br/>Table
+    participant API as Z-Score API
+    participant UI as Dashboard
+    
+    Note over L,H: Continuous Aggregation
+    L->>H: New logs trigger<br/>materialized view
+    H->>H: Aggregate into<br/>hourly buckets
+    
+    Note over B,BT: Nightly Baseline Calculation (2 AM)
+    B->>H: Query: Get hourly counts<br/>for last 30 days
+    H-->>B: Return individual<br/>hourly log_count values
+    B->>B: Group by<br/>(day_of_week, hour_of_day)
+    B->>B: For each pattern with 2+ samples:<br/>Calculate mean, stddev, thresholds
+    B->>BT: Store baselines
+    
+    Note over API,UI: Real-Time Anomaly Detection
+    UI->>API: Request Z-score chart data
+    API->>H: Get recent hourly counts
+    API->>BT: Get baseline statistics
+    API->>API: Calculate Z-scores:<br/>(actual - mean) / stddev
+    API-->>UI: Return chart data<br/>with anomaly flags
+```
+
+### Schema Details
+
+#### `anomaly_baselines` Table
+
+```sql
+CREATE TABLE anomaly_baselines (
+    metric_id UUID,
+    service LowCardinality(String),
+    environment LowCardinality(String),
+    level LowCardinality(String),
+    hour_of_day UInt8,          -- 0-23
+    day_of_week UInt8,          -- 1=Monday, 7=Sunday
+    
+    -- Statistical measures
+    mean_count Float64,
+    stddev_count Float64,
+    median_count Float64,
+    p95_count Float64,
+    p99_count Float64,
+    
+    -- Thresholds for alerting
+    lower_threshold Float64,    -- mean - 2*stddev
+    upper_threshold Float64,    -- mean + 2*stddev
+    
+    -- Metadata
+    sample_size UInt32,         -- Number of samples used
+    last_updated DateTime
+) ENGINE = ReplacingMergeTree(last_updated)
+ORDER BY (service, environment, level, hour_of_day, day_of_week);
+```
+
+### API Endpoints
+
+#### Trigger Baseline Calculation
+
+```bash
+POST /baselines/trigger
+# Response: { "job_id": "...", "status": "running" }
+```
+
+#### Get Z-Score Anomaly Data
+
+```bash
+GET /api/anomalies/zscore?hours=24&service=api-service&level=ERROR
+# Response: {
+#   "data_points": [
+#     {
+#       "timestamp": "2025-12-15T03:00:00Z",
+#       "log_count": 850,
+#       "baseline_mean": 213.0,
+#       "baseline_stddev": 4.0,
+#       "z_score": 159.25,
+#       "is_anomaly": true
+#     },
+#     ...
+#   ],
+#   "threshold": 2.0,
+#   "anomaly_count": 3
+# }
+```
+
+### Best Practices
+
+1. **Lookback Period**:
+   - **Development**: 30 days (4 samples per pattern)
+   - **Production**: 90+ days (12+ samples per pattern)
+   - **Seasonal Systems**: 365 days (captures yearly patterns)
+
+2. **Threshold Tuning**:
+   - Start with Z-score threshold of `2.0` (95% confidence)
+   - Increase to `3.0` to reduce false positives
+   - Decrease to `1.5` for more sensitive detection
+
+3. **Pattern Granularity**:
+   - Current: `(day_of_week, hour_of_day)` = 168 patterns (7 days × 24 hours)
+   - Can extend to: `(day_of_week, hour_of_day, service, environment, level)`
+
+4. **Handling Insufficient Data**:
+   - Patterns with < 2 samples are skipped
+   - Alert when baseline coverage < 80%
+   - Consider reducing lookback period for new services
+
+### Why This Approach Works
+
+✅ **Accounts for Weekly Patterns**: Monday morning ≠ Sunday night  
+✅ **Accounts for Daily Patterns**: 3 AM ≠ 3 PM  
+✅ **Statistical Rigor**: Uses proven Z-score methodology  
+✅ **Self-Learning**: Automatically adapts to system changes  
+✅ **Scalable**: Works across services, environments, and log levels  
+✅ **Explainable**: Clear thresholds and statistical reasoning  
+
+### Visualization
+
+The React dashboard displays Z-score anomaly detection with:
+- **Time-series chart**: Shows Z-score values over time
+- **Threshold lines**: Displays ±2σ boundaries
+- **Anomaly markers**: Highlights spikes exceeding threshold
+- **Baseline overlay**: Shows expected vs. actual log counts
+- **Context**: Links to related logs and patterns
+
+---
+
 ## Technology Stack
 
 ### Core Infrastructure
