@@ -148,7 +148,7 @@ class SemanticSearchRequest(BaseModel):
     top_k: int = Field(20, ge=1, le=100, description="Maximum number of results")
     level: Optional[str] = Field(None, description="Filter by log level")
     service: Optional[str] = Field(None, description="Filter by service name")
-    score_threshold: float = Field(0.7, ge=0.0, le=1.0, description="Minimum similarity score")
+    score_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="Minimum similarity score (if None, uses adaptive threshold based on query length)")
 
 
 @router.post("/semantic", response_model=Union[SemanticSearchResponse, ClusteredSearchResponse])

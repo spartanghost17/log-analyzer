@@ -358,7 +358,7 @@ class DatabaseService:
                 uniqMerge(unique_users) as unique_users,
                 sum(message_length_sum) / sum(message_count) as avg_message_length
             FROM logs_hourly_agg
-            WHERE hour >= now() - INTERVAL :hours HOUR
+            WHERE hour >= now() - INTERVAL :hours HOUR AND hour < now() + INTERVAL :hours HOUR
         """
 
         params = {"hours": hours}
@@ -402,7 +402,7 @@ class DatabaseService:
                 countIf(level = 'INFO') as info_count,
                 uniq(trace_id) as unique_traces
             FROM logs
-            WHERE timestamp >= now() - INTERVAL 24 HOUR
+            WHERE timestamp >= now() - INTERVAL 24 HOUR AND timestamp < now() + INTERVAL 24 HOUR
             GROUP BY service
             ORDER BY total_logs DESC
         """
@@ -433,7 +433,7 @@ class DatabaseService:
                 count() as error_count
             FROM logs
             WHERE level IN ('ERROR', 'FATAL')
-              AND timestamp >= now() - INTERVAL :hours HOUR
+              AND timestamp >= now() - INTERVAL :hours HOUR AND timestamp < now() + INTERVAL :hours HOUR
             GROUP BY hour, service
             ORDER BY hour DESC, service
         """
