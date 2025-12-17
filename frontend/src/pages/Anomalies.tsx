@@ -25,9 +25,9 @@ export const Anomalies = () => {
     queryKey: ['anomalies', severityFilter, statusFilter, serviceFilter],
     queryFn: () => {
       const params: any = { limit: 50 };
-      if (severityFilter !== 'all') params.severity = severityFilter;
-      if (statusFilter !== 'all') params.status = statusFilter;
-      if (serviceFilter !== 'all') params.service = serviceFilter;
+      if (severityFilter.toLocaleLowerCase() !== 'all') params.severity = severityFilter;
+      if (statusFilter.toLocaleLowerCase() !== 'all') params.status = statusFilter;
+      if (serviceFilter.toLocaleLowerCase() !== 'all services') params.service = serviceFilter;
 
       return USE_MOCK_API ? mockApi.getAnomalies(params) : api.getAnomalies(params);
     },
