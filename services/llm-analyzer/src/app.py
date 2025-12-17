@@ -395,71 +395,289 @@ class LLMAnalyzerService:
     # Pattern Detection & Normalization
     # -------------------------------------------------------------------------
 
-    def normalize_error_message(self, message: str) -> str:
-        """
-        Normalize error message for pattern detection
-        Enhanced to handle common variable patterns in logs
-        """
-        # 1. Remove UUIDs (before other number patterns)
-        message = re.sub(
-            r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
-            '<UUID>', message, flags=re.IGNORECASE
-        )
-        
-        # 2. Remove full timestamps (ISO format, etc.)
-        message = re.sub(
-            r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?',
-            '<TIMESTAMP>', message
-        )
-        
-        # 3. Remove IP addresses (before general numbers)
-        message = re.sub(
-            r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b',
-            '<IP>', message
-        )
-        
-        # 4. Remove hex strings
-        message = re.sub(r'\b0x[0-9a-fA-F]+\b', '<HEX>', message)
-        
-        # 5. Normalize numbers with units (e.g., 45s, 100ms, 2GB, 5.5MB)
-        message = re.sub(
-            r'\b\d+(?:\.\d+)?(?:ms|s|m|h|d|MB|GB|KB|TB|%)\b',
-            '<NUM_UNIT>', message, flags=re.IGNORECASE
-        )
-        
-        # 6. Normalize IDs with numbers (e.g., client_8111, user_id_42, session-123)
-        # Match: word + separator + digits
-        message = re.sub(
-            r'\b([a-zA-Z_]+[_-])(\d+)\b',
-            r'\1<NUM>', message
-        )
-        
-        # 7. Normalize port numbers (e.g., :8080, :5432)
-        message = re.sub(r':(\d{2,5})\b', r':<PORT>', message)
-        
-        # 8. Normalize version numbers (e.g., v1.2.3, version 2.0)
-        message = re.sub(
-            r'\bv?\d+\.\d+(?:\.\d+)?(?:\.\d+)?\b',
-            '<VERSION>', message, flags=re.IGNORECASE
-        )
-        
-        # 9. Normalize memory addresses (e.g., 0x7ffe1234abcd)
-        message = re.sub(r'\b0x[0-9a-fA-F]{8,}\b', '<ADDR>', message)
-        
-        # 10. Normalize standalone numbers (catch-all for remaining numbers)
-        # This should come LAST to avoid conflicts
-        message = re.sub(r'\b\d+\b', '<NUM>', message)
-        
-        # 11. Normalize file paths (optional - can help cluster file-related errors)
-        message = re.sub(
-            r'[/\\][\w\-./\\]+\.(py|java|js|ts|go|rb|php|cpp|c|h)',
-            '<FILE>', message, flags=re.IGNORECASE
-        )
-        
-        # 12. Normalize whitespace (multiple spaces/tabs → single space)
-        message = ' '.join(message.split())
-
-        return message
+def normalize_error_message(self, message: str) -> str:
+    """
+    Normalize error message for pattern detection.
+    Enhanced to handle common variable patterns in logs.
+    
+    Order matters - More specific patterns should come before general ones.
+    """
+    
+    # =========================================================================
+    # PHASE 1: SECRETS & SENSITIVE DATA (highest priority)
+    # =========================================================================
+    
+    # JWT tokens (3 base64 segments separated by dots)
+    message = re.sub(
+        r'\beyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\b',
+        '<JWT>', message
+    )
+    
+    # API keys / Bearer tokens (common patterns)
+    message = re.sub(
+        r'(?i)(api[_-]?key|apikey|api_secret|secret[_-]?key|access[_-]?token|auth[_-]?token|bearer)[=:\s]+["\']?[\w\-]{16,}["\']?',
+        r'\1=<SECRET>', message
+    )
+    
+    # Authorization headers
+    message = re.sub(
+        r'(?i)(authorization|x-api-key)[=:\s]+["\']?[\w\-\.]+["\']?',
+        r'\1=<SECRET>', message
+    )
+    
+    # AWS keys
+    message = re.sub(r'\b(AKIA|ABIA|ACCA|ASIA)[A-Z0-9]{16}\b', '<AWS_KEY>', message)
+    message = re.sub(r'(?i)aws[_-]?(secret|access)[_-]?(key|id)?[=:\s]+[\w/+=]{20,}', '<AWS_SECRET>', message)
+    
+    # Generic long hex/base64 secrets (32+ chars, likely tokens)
+    message = re.sub(r'\b[A-Za-z0-9+/]{40,}={0,2}\b', '<TOKEN>', message)
+    
+    # Password in connection strings or logs
+    message = re.sub(
+        r'(?i)(password|passwd|pwd)[=:\s]+["\']?[^\s"\'&]+["\']?',
+        r'\1=<REDACTED>', message
+    )
+    
+    # =========================================================================
+    # PHASE 2: IDENTIFIERS & STRUCTURED DATA
+    # =========================================================================
+    
+    # UUIDs (various formats)
+    message = re.sub(
+        r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+        '<UUID>', message, flags=re.IGNORECASE
+    )
+    # UUIDs without dashes
+    message = re.sub(
+        r'\b[0-9a-f]{32}\b',
+        '<UUID>', message, flags=re.IGNORECASE
+    )
+    
+    # MongoDB ObjectIds (24 hex chars)
+    message = re.sub(r'\b[0-9a-f]{24}\b', '<OBJECT_ID>', message, flags=re.IGNORECASE)
+    
+    # Docker container IDs (12 or 64 hex chars)
+    message = re.sub(r'\b[0-9a-f]{64}\b', '<CONTAINER_ID>', message, flags=re.IGNORECASE)
+    message = re.sub(r'\b[0-9a-f]{12}\b', '<SHORT_ID>', message, flags=re.IGNORECASE)
+    
+    # Git commit hashes (40 hex chars for full, 7-8 for short)
+    message = re.sub(r'\b[0-9a-f]{40}\b', '<GIT_SHA>', message, flags=re.IGNORECASE)
+    message = re.sub(r'\b[0-9a-f]{7,8}\b', '<GIT_SHORT>', message, flags=re.IGNORECASE)
+    
+    # SHA256/SHA512 hashes
+    message = re.sub(r'\b[0-9a-f]{64}\b', '<SHA256>', message, flags=re.IGNORECASE)
+    message = re.sub(r'\b[0-9a-f]{128}\b', '<SHA512>', message, flags=re.IGNORECASE)
+    
+    # MD5 hashes (32 hex chars) - already caught by UUID without dashes
+    
+    # =========================================================================
+    # PHASE 3: NETWORK & INFRASTRUCTURE
+    # =========================================================================
+    
+    # Full URLs (before IP addresses)
+    message = re.sub(
+        r'https?://[^\s<>"{}|\\^`\[\]]+',
+        '<URL>', message, flags=re.IGNORECASE
+    )
+    
+    # Email addresses
+    message = re.sub(
+        r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+        '<EMAIL>', message
+    )
+    
+    # IPv6 addresses
+    message = re.sub(
+        r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b',
+        '<IPv6>', message
+    )
+    message = re.sub(
+        r'\b(?:[0-9a-fA-F]{1,4}:){1,7}:\b',
+        '<IPv6>', message
+    )
+    
+    # IPv4 addresses
+    message = re.sub(
+        r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b',
+        '<IP>', message
+    )
+    
+    # MAC addresses
+    message = re.sub(
+        r'\b([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b',
+        '<MAC>', message
+    )
+    
+    # Hostnames/FQDNs (after URLs and emails)
+    message = re.sub(
+        r'\b[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+\b',
+        '<HOSTNAME>', message
+    )
+    
+    # =========================================================================
+    # PHASE 4: TIMESTAMPS & DATES
+    # =========================================================================
+    
+    # ISO 8601 timestamps
+    message = re.sub(
+        r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?',
+        '<TIMESTAMP>', message
+    )
+    
+    # Unix timestamps (10 or 13 digits)
+    message = re.sub(r'\b1[0-9]{12}\b', '<UNIX_MS>', message)  # milliseconds
+    message = re.sub(r'\b1[0-9]{9}\b', '<UNIX_S>', message)    # seconds
+    
+    # Common date formats
+    message = re.sub(r'\b\d{2}/\d{2}/\d{4}\b', '<DATE>', message)  # MM/DD/YYYY
+    message = re.sub(r'\b\d{4}/\d{2}/\d{2}\b', '<DATE>', message)  # YYYY/MM/DD
+    message = re.sub(r'\b\d{2}-\d{2}-\d{4}\b', '<DATE>', message)  # DD-MM-YYYY
+    
+    # Time only
+    message = re.sub(r'\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b', '<TIME>', message)
+    
+    # =========================================================================
+    # PHASE 5: KUBERNETES & CLOUD
+    # =========================================================================
+    
+    # Kubernetes pod names (name-hash-hash pattern)
+    message = re.sub(
+        r'\b[a-z0-9-]+-[a-z0-9]{5,10}-[a-z0-9]{5}\b',
+        '<K8S_POD>', message, flags=re.IGNORECASE
+    )
+    
+    # Kubernetes namespaces/resources
+    message = re.sub(
+        r'(?i)(namespace|ns)[=:\s/]+[a-z0-9-]+',
+        r'\1=<NAMESPACE>', message
+    )
+    
+    # AWS ARNs
+    message = re.sub(
+        r'arn:aws:[a-z0-9-]+:[a-z0-9-]*:\d*:[a-zA-Z0-9-_/:.]+',
+        '<ARN>', message
+    )
+    
+    # S3 paths
+    message = re.sub(
+        r's3://[a-z0-9.-]+/[^\s]+',
+        '<S3_PATH>', message, flags=re.IGNORECASE
+    )
+    
+    # =========================================================================
+    # PHASE 6: CODE & STACK TRACES
+    # =========================================================================
+    
+    # Stack trace line numbers (File "path", line 123)
+    message = re.sub(
+        r'(?i)(file\s+["\'][^"\']+["\'],?\s*line\s*)\d+',
+        r'\1<LINE>', message
+    )
+    
+    # Java/Python/JS stack trace format (at Class.method(File.java:123))
+    message = re.sub(
+        r'(\w+\.\w+)\(([^:]+):(\d+)\)',
+        r'\1(<FILE>:<LINE>)', message
+    )
+    
+    # Line/column numbers in errors
+    message = re.sub(r'(?i)(line|ln|row|col|column)[:\s]+\d+', r'\1:<NUM>', message)
+    
+    # File paths (Unix and Windows)
+    message = re.sub(
+        r'(?:/[\w.-]+)+(?:\.\w+)?',
+        '<PATH>', message
+    )
+    message = re.sub(
+        r'[A-Za-z]:\\(?:[\w.-]+\\)*[\w.-]+',
+        '<PATH>', message
+    )
+    
+    # Module/package paths (e.g., com.example.MyClass, app.services.user)
+    message = re.sub(
+        r'\b[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*){2,}\.[A-Z]\w*\b',
+        '<CLASS_PATH>', message
+    )
+    
+    # =========================================================================
+    # PHASE 7: DATABASE & QUERIES
+    # =========================================================================
+    
+    # Connection strings (sanitize credentials)
+    message = re.sub(
+        r'(?i)(postgres|mysql|mongodb|redis|amqp|jdbc)://[^\s]+',
+        r'\1://<CONN_STRING>', message
+    )
+    
+    # SQL table.column references
+    message = re.sub(
+        r'\b[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*\b',
+        '<TABLE.COLUMN>', message, flags=re.IGNORECASE
+    )
+    
+    # =========================================================================
+    # PHASE 8: IDs & NUMERIC PATTERNS
+    # =========================================================================
+    
+    # Hex values
+    message = re.sub(r'\b0x[0-9a-fA-F]+\b', '<HEX>', message)
+    
+    # Memory addresses
+    message = re.sub(r'\b0x[0-9a-fA-F]{8,16}\b', '<ADDR>', message)
+    
+    # Version numbers (e.g., v1.2.3, 2.0.0-beta.1)
+    message = re.sub(
+        r'\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b',
+        '<VERSION>', message, flags=re.IGNORECASE
+    )
+    
+    # Port numbers (e.g., :8080, :5432)
+    message = re.sub(r':(\d{2,5})\b', ':<PORT>', message)
+    
+    # Numbers with units (e.g., 45s, 100ms, 2GB, 5.5MB, 99%)
+    message = re.sub(
+        r'\b\d+(?:\.\d+)?\s*(?:ms|μs|ns|s|m|h|d|w|y|B|KB|MB|GB|TB|PB|%|rpm|rps|qps|tps|iops)\b',
+        '<METRIC>', message, flags=re.IGNORECASE
+    )
+    
+    # Duration formats (e.g., 2h30m, 1m45s)
+    message = re.sub(
+        r'\b(?:\d+h)?(?:\d+m)?(?:\d+s)?(?:\d+ms)?\b',
+        '<DURATION>', message, flags=re.IGNORECASE
+    )
+    
+    # IDs with prefixes (e.g., user_123, order-456, req_abc123)
+    message = re.sub(
+        r'\b([a-zA-Z][a-zA-Z0-9]*[_-])([a-zA-Z0-9]+)\b',
+        r'\1<ID>', message
+    )
+    
+    # Thread/Process IDs
+    message = re.sub(r'(?i)(thread|tid|pid|process)[=:\s#-]*\d+', r'\1=<ID>', message)
+    
+    # HTTP status codes (keep the code category)
+    message = re.sub(r'\b[1-5]\d{2}\b', '<HTTP_CODE>', message)
+    
+    # Standalone numbers (catch-all - MUST BE LAST in numeric patterns)
+    message = re.sub(r'\b\d+\b', '<NUM>', message)
+    
+    # =========================================================================
+    # PHASE 9: CLEANUP
+    # =========================================================================
+    
+    # Collapse multiple placeholders (e.g., <NUM>.<NUM>.<NUM> -> <VERSION>)
+    message = re.sub(r'(<NUM>\.){2,}<NUM>', '<VERSION>', message)
+    
+    # Collapse repeated placeholders
+    message = re.sub(r'(<\w+>)(\s*\1)+', r'\1', message)
+    
+    # Normalize whitespace
+    message = ' '.join(message.split())
+    
+    # Normalize case for better grouping (optional - depends on use case)
+    # message = message.lower()
+    
+    return message
 
     def compute_pattern_hash(self, normalized_message: str) -> str:
         """Compute hash for error pattern"""
@@ -885,7 +1103,7 @@ class LLMAnalyzerService:
             # Detect anomalies (patterns with >10% of total logs)
             anomaly_threshold = total_logs * 0.1
             anomalous_patterns = [p for p in patterns if p.count > anomaly_threshold]
-
+            self.logger.info("anomalous_patterns", count=len(anomalous_patterns), patterns=anomalous_patterns, patterns_t=patterns)
             for pattern in anomalous_patterns:
                 # Check if we already have a recent alert for this pattern
                 recent_alert = session.query(AnomalyAlert).filter(
@@ -1147,7 +1365,7 @@ Format your response clearly with sections. Be concise and actionable."""
                 report_id = uuid4()
                 report = NightlyReport(
                     report_id=report_id,
-                    report_date=datetime.strptime("14/12/2025", "%d/%m/%Y").date(),#datetime.now(timezone.utc).date(),#TODO: make sure to set this back to the system timestamp later
+                    report_date=datetime.strptime("16/12/2025", "%d/%m/%Y").date(),#datetime.now(timezone.utc).date(),#TODO: make sure to set this back to the system timestamp later
                     start_time=start_time,
                     end_time=end_time,
                     total_logs_processed=len(logs),
