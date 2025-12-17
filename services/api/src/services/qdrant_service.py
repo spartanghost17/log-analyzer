@@ -191,7 +191,6 @@ class QdrantService:
             data = response.json()
 
             embedding = data["embeddings"][0]["embedding"]
-
             # Cache the embedding (24 hour TTL)
             if use_cache:
                 try:
@@ -212,29 +211,94 @@ class QdrantService:
             self.logger.error("embedding_generation_failed", error=str(e))
             raise
 
+    def _calculate_adaptive_threshold(self, query: str, user_threshold: Optional[float] = None) -> float:
+        """
+        Calculate adaptive similarity threshold based on query characteristics
+        
+        Research-backed thresholds based on query type:
+        - Exact paraphrase (long, detailed): 0.70–0.95
+        - Same topic, fewer words: 0.45–0.65
+        - Short query vs long log: 0.35–0.55
+        - Keyword-style query: 0.25–0.45
+        
+        Args:
+            query: Search query text
+            user_threshold: User-specified threshold (overrides adaptive)
+            
+        Returns:
+            Recommended similarity threshold
+        """
+        # If user explicitly set threshold, respect it
+        if user_threshold is not None:
+            return user_threshold
+        
+        # Analyze query characteristics
+        word_count = len(query.split())
+        char_count = len(query.strip())
+        has_sentence_structure = any(p in query for p in ['.', '!', '?', 'the', 'a', 'an', 'is', 'are', 'was', 'were'])
+        
+        # Adaptive threshold logic
+        if word_count >= 15 or (word_count >= 10 and has_sentence_structure):
+            # Long descriptive query - high threshold
+            # Example: "Error sending email notification through SendGrid API with timeout"
+            threshold = 0.70
+            query_type = "descriptive"
+        elif word_count >= 7 and has_sentence_structure:
+            # Medium query with structure - medium-high threshold
+            # Example: "The email service failed to send notification"
+            threshold = 0.55
+            query_type = "structured"
+        elif word_count >= 4:
+            # Short query - medium threshold
+            # Example: "email notification SendGrid error"
+            threshold = 0.40
+            query_type = "short"
+        else:
+            # Keyword query - low threshold
+            # Example: "email SendGrid"
+            threshold = 0.30
+            query_type = "keywords"
+        
+        self.logger.info("adaptive_threshold_calculated",
+                        query_preview=query[:50],
+                        word_count=word_count,
+                        query_type=query_type,
+                        threshold=threshold)
+        
+        return threshold
+
     async def semantic_search(
         self,
         query: str,
         limit: int = 10,
         service: Optional[str] = None,
         level: Optional[str] = None,
-        score_threshold: float = 0.7,
+        score_threshold: Optional[float] = None,  # Now optional - will use adaptive if None
         enrich_with_clickhouse: bool = True
     ) -> List[Dict[str, Any]]:
         """
-        Perform semantic search on log embeddings
+        Perform semantic search on log embeddings with adaptive thresholding
+        
+        The search automatically adjusts similarity thresholds based on query type:
+        - Long descriptive queries: High threshold (0.70) for precise matches
+        - Medium queries: Medium threshold (0.55) for relevant matches
+        - Short queries: Lower threshold (0.40) for broader matches
+        - Keyword queries: Low threshold (0.30) for topic-based matches
 
         Args:
-            query: Search query text
+            query: Search query text (can be descriptive or keywords)
             limit: Maximum number of results
             service: Filter by service name
             level: Filter by log level
-            score_threshold: Minimum similarity score (0-1)
+            score_threshold: Manual threshold override (if None, uses adaptive)
             enrich_with_clickhouse: Whether to fetch full log details from ClickHouse
 
         Returns:
             List of similar logs with scores
         """
+        
+        # Calculate adaptive threshold if not explicitly provided
+        adaptive_threshold = self._calculate_adaptive_threshold(query, score_threshold)
 
         # Get embedding for query
         query_vector = await self.get_embedding(query)
@@ -254,12 +318,12 @@ class QdrantService:
                 "match": {"value": level}
             })
 
-        # Build search request
+        # Build search request with adaptive threshold
         search_request = {
             "vector": query_vector,
             "limit": limit,
             "with_payload": True,
-            "score_threshold": score_threshold
+            "score_threshold": adaptive_threshold
         }
 
         if filter_conditions:
@@ -377,7 +441,7 @@ class QdrantService:
         # Get the reference log's vector
         try:
             # First, search for the log to get its vector
-            # In a real implementation, you might store the vector ID separately
+            # TODO: for later (real) implementation, you might store the vector ID separately
             # For now, we'll retrieve the point by filtering on log_id
 
             search_request = {
@@ -553,11 +617,15 @@ class QdrantService:
         top_k: int = 20,
         service: Optional[str] = None,
         level: Optional[str] = None,
-        score_threshold: float = 0.7,
+        score_threshold: Optional[float] = None,  # Now optional - uses adaptive
         similarity_threshold: float = 0.85
     ) -> Dict[str, Any]:
         """
-        Perform semantic search and return clustered results
+        Perform semantic search and return clustered results with adaptive thresholding
+        
+        The search automatically adjusts similarity thresholds based on query type:
+        - Long queries → High precision (threshold ~0.70)
+        - Short queries → Broader matches (threshold ~0.30-0.40)
         
         Clustering hierarchy:
         1. Environment (production, staging, dev)
@@ -567,11 +635,11 @@ class QdrantService:
         5. Similarity (group logs with score > similarity_threshold)
         
         Args:
-            query: Search query text
+            query: Search query (descriptive or keywords)
             top_k: Maximum number of results
             service: Optional service filter
             level: Optional level filter
-            score_threshold: Minimum similarity score
+            score_threshold: Manual threshold override (if None, uses adaptive)
             similarity_threshold: Not used in pattern-based clustering
             
         Returns:
@@ -579,13 +647,13 @@ class QdrantService:
         """
         start_time = time.time()
         
-        # Step 1: Get raw search results (same as before)
+        # Step 1: Get raw search results with adaptive thresholding
         results = await self.semantic_search(
             query=query,
             limit=top_k,
             service=service,
             level=level,
-            score_threshold=score_threshold,
+            score_threshold=score_threshold,  # Will use adaptive if None
             enrich_with_clickhouse=True
         )
         
