@@ -49,8 +49,8 @@ export const SemanticSearch = () => {
         : api.searchSemanticClustered({
             query,
             top_k: 20,
-            level: filters.level,
-            service: filters.service || undefined,
+            level: filters.level, //? filters.level : "ERROR",
+            service: filters.service || undefined,// ? filters.service : "api-gateway"// || undefined,
           }),
   });
 
@@ -61,7 +61,7 @@ export const SemanticSearch = () => {
   };
 
   const handleClusterAnalyze = (cluster: LogCluster) => {
-    // Future: Send to LLM for analysis
+    // Future: Send to LLM for analysis TODO: Add functionality for this later
     toast.success(`Analyzing ${cluster.metadata.log_count} logs in cluster...`);
   };
 
@@ -174,8 +174,12 @@ export const SemanticSearch = () => {
                         </span>
                       </div>
 
-                      <div className="text-xs text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">
-                        {cluster.metadata.dominant_message_pattern}
+                      <div className="relative overflow-hidden mb-3">
+                        <div className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
+                          {cluster.metadata.dominant_message_pattern}
+                        </div>
+                        {/* Vertical gradient fade from bottom */}
+                        <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white dark:from-surface-dark to-transparent pointer-events-none" />
                       </div>
 
                       <div className="flex items-center justify-between text-xs text-gray-500">
@@ -387,7 +391,7 @@ export const SemanticSearch = () => {
                                 <span className="material-icons-outlined text-xs text-red-500">bug_report</span>
                                 Stack Trace
                               </h4>
-                              <pre className="text-xs font-mono text-red-900 dark:text-red-300 bg-red-50 dark:bg-red-900/10 p-3 rounded border border-red-200 dark:border-red-800 overflow-x-auto max-h-64">
+                              <pre className="text-xs font-mono text-red-900 dark:text-red-300 bg-red-50 dark:bg-red-900/10 p-3 rounded border border-red-200 dark:border-red-800 overflow-x-auto overflow-y-auto max-h-64 scrollbar-thin scrollbar-thumb-red-400 dark:scrollbar-thumb-red-600 scrollbar-track-red-100 dark:scrollbar-track-red-900/20">
                                 {result.stack_trace}
                               </pre>
                             </div>
